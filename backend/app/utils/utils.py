@@ -1,11 +1,11 @@
 import json
 import re
 from backend.app.db.connect_db import DatabaseConnection
+import asyncio
 
 def format_prompt(prompt_template, **kwargs):
     """ Formats a given prompt template with provided keyword arguments """
     return prompt_template.format(**kwargs)
-
 
 def extract_time_geo_granularity(granularity_str):
     """ Extract time and geo granularity lists from a JSON string """
@@ -90,3 +90,16 @@ def validate_and_load_json(json_str):
     except json.JSONDecodeError as e:
         return None, str(e)
 
+async def check_run_status(thread_id, run_id, openai_client, attempt=0):
+    """ Hacky implementation to check the status of the assistant thread """
+    MAX_ATTEMPTS = 30
+    DELAY_BETWEEM_ATTEMPTS = 1  # seconds
+
+    while attempt < MAX_ATTEMPTS:
+        run_status = openai_client.run_status(thread_id=thread_id, run_id=run_id)
+        if run_status == "completed":
+            return True
+        else:
+            await asyncio.sleep(DELAY_BETWEEM_ATTEMPTS)
+            attempt += 1
+    return False

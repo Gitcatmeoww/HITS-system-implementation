@@ -7,6 +7,7 @@ sqlalchemy
 psycopg2-binary
 psycopg2
 Flask
+flask[async]
 instructor
 pydantic
 anthropic
