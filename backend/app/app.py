@@ -100,7 +100,7 @@ def initial_search():
 
         response_data = {
             "top_results": initial_results[:10],
-            "complete_results": initial_results,
+            "complete_results": [result["table_name"] for result in initial_results],
         }
 
         logging.info(f"✅Search successful for query: {initial_query}")
@@ -174,7 +174,7 @@ def refine_search_space():
         # Package the response with additional information from the second message onwards
         response_data = {
             "top_results": refined_results[:10],
-            "complete_results": refined_results,
+            "complete_results": [result["table_name"] for result in refined_results],
             "inferred_action": inferred_action.get_true_fields(),
             "mention_semantic_fields": inferred_semantic_fields,
             "mention_raw_fields": inferred_raw_fields,
@@ -200,7 +200,7 @@ def reset_search_space():
 
     try:
         # Update the cached results
-        chat_history[thread_id + "_cached_results"] = [result["table_name"] for result in results]
+        chat_history[thread_id + "_cached_results"] = results
         logging.info(f"💬Current chat history: {chat_history}")
         return jsonify({"success": True}), 200
     except Exception as e:

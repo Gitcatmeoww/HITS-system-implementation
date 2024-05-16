@@ -5,6 +5,7 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Button from '@mui/material/Button';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import Box from '@mui/material/Box';
 
 const ResultsTable = ({ results, onResetSearch }) => {
     return (
@@ -28,18 +29,20 @@ const ResultsTable = ({ results, onResetSearch }) => {
                 </TableBody>
             </Table>
 
-            <Button
-                variant="outlined"
-                size="small"
-                startIcon={<RestartAltIcon />}
-                onClick={onResetSearch}
-                sx={{
-                    margin: '15px 0px',
-                    fontSize: '0.8rem',
-                }}
-            >
-                Reset Search Space from Here
-            </Button>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<RestartAltIcon />}
+                    onClick={onResetSearch}
+                    sx={{
+                        margin: '15px 0px',
+                        fontSize: '0.8rem',
+                    }}
+                >
+                    Reset Search Space from Here
+                </Button>
+            </Box>
         </div>
     );
 };

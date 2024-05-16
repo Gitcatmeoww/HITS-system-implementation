@@ -7,6 +7,9 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
 import ResultsTable from './ResultsTable';
+import Chip from '@mui/material/Chip';
+import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
+import KeyboardArrowLeftIcon from '@mui/icons-material/KeyboardArrowLeft';
 
 function ChatContainer() {
     const [messages, setMessages] = useState([]);
@@ -15,6 +18,9 @@ function ChatContainer() {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
     const [successMessage, setSuccessMessage] = useState('');
+    const [currentSearchSpace, setCurrentSearchSpace] = useState([]);
+    const [isChipExpanded, setIsChipExpanded] = useState(true);
+
 
     useEffect(() => {
         startNewThread();
@@ -82,13 +88,18 @@ function ChatContainer() {
 
                 const completeResults = searchResponse.data.complete_results;
 
+                // Update the current search space
+                setCurrentSearchSpace(completeResults);
+
                 const reply = {
                     id: messages.length + 2,
                     text: (
                         <>
                             {additionalInfo}
                             {searchResponse.data.top_results && searchResponse.data.top_results.length > 0
-                                ? <ResultsTable results={searchResponse.data.top_results} onResetSearch={() => handleResetSearch(completeResults)} />
+                                ? <ResultsTable
+                                    results={searchResponse.data.top_results}
+                                    onResetSearch={() => handleResetSearch(completeResults)} />
                                 : <p>No results found or an error occurred.</p>}
                         </>
                     ),
@@ -119,8 +130,8 @@ function ChatContainer() {
 
             // Set success message
             setSuccessMessage('Search space has been successfully reset.');
-
-            console.log('Reset search space successful:', response.data);
+            // Update the current search space
+            setCurrentSearchSpace(completeResults);
         } catch (error) {
             console.error('Error resetting search space:', error);
             setError('Could not reset search space. Please try again.');
@@ -129,6 +140,11 @@ function ChatContainer() {
 
     const handleCloseSnackbar = () => {
         setError('');
+        setSuccessMessage('');
+    };
+
+    const toggleChipExpansion = () => {
+        setIsChipExpanded(!isChipExpanded);
     };
 
     return (
@@ -157,6 +173,16 @@ function ChatContainer() {
                 )}
             </Box>
             <InputArea onSendMessage={sendMessage} />
+
+            {currentSearchSpace.length > 0 && (
+                <Chip
+                    icon={isChipExpanded ? <KeyboardArrowRightIcon /> : <KeyboardArrowLeftIcon />}
+                    label={isChipExpanded ? `Current Search Space: ${currentSearchSpace.length} tables` : ''}
+                    sx={{ position: 'fixed', bottom: 100, right: 30, fontSize: '0.75rem', fontWeight: 'bold', color: '#ABADC6', backgroundColor: '#424867' }}
+                    onClick={toggleChipExpansion}
+                />
+            )}
+
             <Snackbar open={!!error} autoHideDuration={6000} onClose={handleCloseSnackbar}>
                 <Alert onClose={handleCloseSnackbar} severity="error" sx={{ width: '100%' }}>
                     {error}
