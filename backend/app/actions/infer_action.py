@@ -1,5 +1,5 @@
 from backend.app.table_representation.openai_client import OpenAIClient
-from backend.app.utils import format_prompt
+from backend.app.utils import format_prompt, get_finer_granularities
 from pydantic import BaseModel
 from typing import List, Dict
 import logging
@@ -158,6 +158,10 @@ def execute_sql(text_to_sql_instance, search_space):
         'geographic_granularity': 'geo_granu'
     }
 
+    # Define finer granularity levels
+    time_granu_order = ['second', 'minute', 'hour', 'day', 'week', 'month', 'quarter', 'year']
+    geo_granu_order = ['zip code/postal code', 'city', 'county/district', 'state/province', 'country', 'continent']
+
     with DatabaseConnection() as db:
         # Base query with initial WHERE condition for the search space
         query_base = sql.SQL("SELECT DISTINCT table_name, popularity FROM corpus_raw_metadata_with_embedding WHERE table_name = ANY(%s)")
@@ -178,12 +182,16 @@ def execute_sql(text_to_sql_instance, search_space):
             else:
                 operator, value = clause.clause.split(' ', 1)
                 value = value.strip("'").lower()  # Strip quotes and convert to lowercase
-                if db_field in ['time_granu', 'geo_granu']:
-                    # Using unnest to compare elements in an array field
-                    condition = sql.SQL("EXISTS (SELECT 1 FROM unnest({}) AS elem WHERE elem {} %s)").format(
-                        sql.Identifier(db_field), sql.SQL(operator))
+                if db_field == 'time_granu':
+                    finer_granularities = get_finer_granularities(value, time_granu_order)
+                    condition = sql.SQL("{} && %s::text[]").format(sql.Identifier(db_field))  # Uses && %s::text[] to check for array overlap
                     where_conditions.append(condition)
-                    parameters.append(value)  # Add value to parameters list
+                    parameters.append(finer_granularities)
+                elif db_field == 'geo_granu':
+                    finer_granularities = get_finer_granularities(value, geo_granu_order)
+                    condition = sql.SQL("{} && %s::text[]").format(sql.Identifier(db_field))
+                    where_conditions.append(condition)
+                    parameters.append(finer_granularities)
                 else:
                     condition = sql.SQL("{} {} %s").format(sql.Identifier(db_field), sql.SQL(operator))
                     where_conditions.append(condition)

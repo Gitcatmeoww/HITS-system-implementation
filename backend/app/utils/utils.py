@@ -111,3 +111,10 @@ def extract_granularities(json_data):
             geo_granu.append(table["Geographic granularity"])
     
     return time_granu, geo_granu
+
+def get_finer_granularities(granularity, order_list):
+        """ Return the finer granularities including the specified one """
+        if granularity.lower() in order_list:
+            index = order_list.index(granularity.lower())
+            return order_list[:index + 1]
+        return []
