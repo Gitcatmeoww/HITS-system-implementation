@@ -2,6 +2,7 @@ hits/
 .ipynb_checkpoints/
 .env
 __pycache__/
+.DS_Store
 
 # Frontend dependencies
 /frontend/my-app/node_modules/
