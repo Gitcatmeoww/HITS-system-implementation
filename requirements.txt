@@ -11,3 +11,4 @@ instructor
 pydantic
 anthropic
 elasticsearch
+tiktoken
