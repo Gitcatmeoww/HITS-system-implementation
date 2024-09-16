@@ -1,6 +1,8 @@
 import json
 import re
 from backend.app.db.connect_db import DatabaseConnection
+import pandas as pd
+import ast
 
 def format_prompt(prompt_template, **kwargs):
     """ Formats a given prompt template with provided keyword arguments """
@@ -118,3 +120,28 @@ def get_finer_granularities(granularity, order_list):
             index = order_list.index(granularity.lower())
             return order_list[:index + 1]
         return []
+
+def parse_list_column(column_value):
+    """ Parse a string representation of a list into a Python list of strings """
+    if pd.isna(column_value):
+        return []
+    try:
+        parsed_value = ast.literal_eval(column_value)
+        if isinstance(parsed_value, list):
+            return [str(item).strip() for item in parsed_value]
+        else:
+            return [str(parsed_value).strip()]
+    except Exception as e:
+        print(f"Error parsing list column '{column_value}': {e}")
+        return [str(column_value).strip()]
+
+def parse_json_column(column_value):
+    """ Parse a string representation of a JSON object into a Python dictionary """
+    if pd.isna(column_value):
+        return None
+    try:
+        parsed_value = ast.literal_eval(column_value)
+        return parsed_value
+    except Exception as e:
+        print(f"Error parsing JSON column '{column_value}': {e}")
+        return None
