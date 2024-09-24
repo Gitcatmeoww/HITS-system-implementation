@@ -134,16 +134,13 @@ def infer_multiple_hypothetical_schema(initial_query, num_left):
     m = len(response)
     return response, m
 
-def cos_sim_search(input_embedding, search_space, column_name="comb_embed"):
-    if column_name not in ["comb_embed", "query_embed"]:
-        raise ValueError("Invalid embedding column")
-    
+def cos_sim_search(input_embedding, search_space, table_name="corpus_raw_metadata_with_embedding", column_name="comb_embed"):  
     with DatabaseConnection() as db:
         if search_space:
             # Filter by specific table names
             query = f"""
                 SELECT table_name, 1 - ({column_name} <=> %s::VECTOR(1536)) AS cosine_similarity
-                FROM corpus_raw_metadata_with_embedding
+                FROM {table_name}
                 WHERE table_name = ANY(%s)
                 ORDER BY cosine_similarity DESC;
             """
@@ -152,7 +149,7 @@ def cos_sim_search(input_embedding, search_space, column_name="comb_embed"):
             # No specific search space, search through all table names
             query = f"""
                 SELECT table_name, 1 - ({column_name} <=> %s::VECTOR(1536)) AS cosine_similarity
-                FROM corpus_raw_metadata_with_embedding
+                FROM {table_name}
                 ORDER BY cosine_similarity DESC;
             """
             db.cursor.execute(query, (input_embedding,))
