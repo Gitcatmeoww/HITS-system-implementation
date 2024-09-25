@@ -59,7 +59,7 @@ class TableSchema(BaseModel):
     data_types: List[str]
     example_row: List[Any]
 
-def hyse_search(initial_query, search_space=None, num_schema=1, k=10):
+def hyse_search(initial_query, search_space=None, num_schema=1, k=10, table_name="corpus_raw_metadata_with_embedding", column_name="comb_embed"):
     # Step 0: Initialize the results list and num_left
     results = []
     num_left = num_schema
@@ -73,7 +73,7 @@ def hyse_search(initial_query, search_space=None, num_schema=1, k=10):
     single_hypo_schema_embedding = openai_client.generate_embeddings(text=single_hypo_schema_json)
 
     # Step 1.3: Cosine similarity search between e(hypo_schema_embed) and e(existing_scheme_embed)
-    single_hyse_results = cos_sim_search(single_hypo_schema_embedding, search_space)
+    single_hyse_results = cos_sim_search(single_hypo_schema_embedding, search_space, table_name, column_name)
     results.append(single_hyse_results)
 
     # Step 1.4: Update num_left by decrementing it by 1
@@ -94,7 +94,7 @@ def hyse_search(initial_query, search_space=None, num_schema=1, k=10):
 
         # Step 2.4: Cosine similarity search for each multiple hypothetical schema embedding
         for hypo_schema_embedding in multi_hypo_schemas_embeddings:
-            results.append(cos_sim_search(hypo_schema_embedding, search_space))
+            results.append(cos_sim_search(hypo_schema_embedding, search_space, table_name, column_name))
         
         # Step 2.5: Update num_left by decrementing it by m
         num_left -= m

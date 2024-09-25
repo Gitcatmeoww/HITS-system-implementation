@@ -3,6 +3,7 @@ from backend.app.hyse.hypo_schema_search import cos_sim_search
 import logging
 from dotenv import load_dotenv
 from backend.app.evals.elastic_search.es_client import es_client
+from backend.app.hyse.hypo_schema_search import hyse_search
 
 load_dotenv()
 
@@ -12,22 +13,24 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 openai_client = OpenAIClient()
 
 class HyseEval:
-    def __init__(self, data_split):
+    def __init__(self, data_split, embed_col, k):
         self.openai_client = openai_client
         self.es_client = es_client.client
         self.data_split = data_split
+        self.embed_col = embed_col
+        self.k = k
 
     # Evaluate semantic keywords search & semantic task search against HySE
-    def semantic_search(self, query, k):
+    def semantic_search(self, query):
         try:
             # Step 1: Generate embedding for the query (keyword / task)
-            query_embedding = openai_client.generate_embeddings(text=query)
+            query_embedding = self.openai_client.generate_embeddings(text=query)
 
             # Step 2: Cosine similarity search between e(query_embed) and e(existing_scheme_embed)
-            semantic_results = cos_sim_search(query_embedding, search_space=None, table_name=self.data_split, column_name="example_rows_embed")
+            semantic_results = cos_sim_search(query_embedding, search_space=None, table_name=self.data_split, column_name=self.embed_col)
 
             # Extract and return only the table names of the top k results
-            top_k_results = [result['table_name'] for result in semantic_results[:k]]
+            top_k_results = [result['table_name'] for result in semantic_results[:self.k]]
             return top_k_results
         except Exception as e:
             logging.error(f"Error during semantic search: {e}")
@@ -35,7 +38,7 @@ class HyseEval:
     
     # Evaluate syntactic keywords search against HySE
     # Perform syntactic keyword search against table_name & example_rows_md fields
-    def syntactic_search(self, query, k):
+    def syntactic_search(self, query):
         try:
             # Validate data_split
             valid_splits = ['eval_data_all', 'eval_data_test', 'eval_data_train', 'eval_data_validation']
@@ -53,7 +56,7 @@ class HyseEval:
 
             # Define the search query
             es_query = {
-                "size": k,
+                "size": self.k,
                 "query": {
                     "bool": {
                         "should": [
@@ -87,18 +90,42 @@ class HyseEval:
         except Exception as e:
             logging.error(f"Error during syntactic search: {e}")
             return []
+    
+    def hyse_search(self, query, num_schema=1):
+        try:
+            results = hyse_search(
+                query,
+                search_space=None,
+                num_schema=num_schema,
+                k=self.k,
+                table_name=self.data_split,
+                column_name=self.embed_col
+            )
+            return results
+        except Exception as e:
+            logging.error(f"Error during hyse search: {e}")
+            return []
 
 
 if __name__ == "__main__":
     # Create an instance of HyseEval
-    hyse_eval = HyseEval(data_split="eval_data_validation")
+    hyse_eval = HyseEval(
+        data_split="eval_data_validation",
+        embed_col="example_rows_embed",
+        k=10
+    )
 
     # Test for semantic search
     query = "medicine demand forecast"
-    top_k_semantic = hyse_eval.semantic_search(query, k=10)
+    top_k_semantic = hyse_eval.semantic_search(query)
     print("Semantic Search Results:", top_k_semantic)
 
     # Test for syntactic search
     syntactic_query = "demand forecast"
-    top_k_syntactic = hyse_eval.syntactic_search(syntactic_query, k=10)
+    top_k_syntactic = hyse_eval.syntactic_search(syntactic_query)
     print("Syntactic Search Results:", top_k_syntactic)
+
+    # Test for hyse search
+    semantic_query = "What data is needed to train a machine learning model to forecast demand for medicines?"
+    top_k_hyse = hyse_eval.hyse_search(semantic_query)
+    print("HySE Search Results:", top_k_hyse)
