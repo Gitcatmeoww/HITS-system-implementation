@@ -9,7 +9,7 @@ load_dotenv()
 class OpenAIClient:
     def __init__(self):
         self.client = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
-        self.text_generation_model_default = "gpt-4o"
+        self.text_generation_model_default = "gpt-4o-mini"
         self.embedding_model_default = "text-embedding-3-small"
         # self.client = AzureOpenAI(
         #     azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT"), 

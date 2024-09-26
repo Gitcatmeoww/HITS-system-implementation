@@ -13,3 +13,4 @@ anthropic
 elasticsearch
 tiktoken
 pytest
+tqdm
