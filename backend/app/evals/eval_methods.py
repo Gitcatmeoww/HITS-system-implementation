@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Initialize OpenAI client
 openai_client = OpenAIClient()
 
-class HyseEval:
+class EvalMethods:
     def __init__(self, data_split, embed_col, k):
         self.openai_client = openai_client
         self.es_client = es_client.client
@@ -101,7 +101,9 @@ class HyseEval:
                 table_name=self.data_split,
                 column_name=self.embed_col
             )
-            return results
+
+            # Extract only the table_name from each result
+            return [result['table_name'] for result in results]
         except Exception as e:
             logging.error(f"Error during hyse search: {e}")
             return []
@@ -109,7 +111,7 @@ class HyseEval:
 
 if __name__ == "__main__":
     # Create an instance of HyseEval
-    hyse_eval = HyseEval(
+    hyse_eval = EvalMethods(
         data_split="eval_data_validation",
         embed_col="example_rows_embed",
         k=10
