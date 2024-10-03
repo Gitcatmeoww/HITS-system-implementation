@@ -92,7 +92,7 @@ def initial_search():
         return jsonify({"error": "No query provided"}), 400
 
     try:
-        initial_results = hyse_search(initial_query, search_space=None, num_schema=1, k=50)  # Keep top 50 results in initial search
+        initial_results, _, _ = hyse_search(initial_query, search_space=None, num_schema=1, k=50)  # Keep top 50 results in initial search
         append_system_response(chat_history, thread_id, initial_results, refine_type="semantic")
 
         # Update the cached results

@@ -9,7 +9,7 @@ def handle_semantic_fields(chat_history, thread_id, search_space):
     # Concatenate the filtered messages into a single string
     semantic_queries_comb = ' '.join(semantic_queries)
     # Run hyse again
-    refined_results = hyse_search(semantic_queries_comb, search_space)
+    refined_results, _, _ = hyse_search(semantic_queries_comb, search_space)
 
     return refined_results
 
