@@ -2,7 +2,7 @@ from backend.app.table_representation.openai_client import OpenAIClient
 from backend.app.hyse.hypo_schema_search import cos_sim_search
 import logging
 from dotenv import load_dotenv
-from backend.app.evals.elastic_search.es_client import es_client
+# from backend.app.evals.elastic_search.es_client import es_client
 from backend.app.hyse.hypo_schema_search import hyse_search
 from eval_utils import get_hypo_schema_from_db, save_hypo_schema_to_db
 
@@ -16,7 +16,7 @@ openai_client = OpenAIClient()
 class EvalMethods:
     def __init__(self, data_split, embed_col, k):
         self.openai_client = openai_client
-        self.es_client = es_client.client
+        # self.es_client = es_client.client
         self.data_split = data_split
         self.embed_col = embed_col
         self.k = k

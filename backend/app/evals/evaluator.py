@@ -86,7 +86,7 @@ class Evaluator:
             {'name': 'HySE Search', 'function': self.eval_methods.hyse_search, 'query_type': 'task'},
             {'name': 'Semantic Task Search', 'function': self.eval_methods.semantic_search, 'query_type': 'task'},
             {'name': 'Semantic Keyword Search', 'function': self.eval_methods.semantic_search, 'query_type': 'keyword'},
-            {'name': 'Syntactic Keyword Search', 'function': self.eval_methods.syntactic_search, 'query_type': 'keyword'}
+            # {'name': 'Syntactic Keyword Search', 'function': self.eval_methods.syntactic_search, 'query_type': 'keyword'}
         ]
         precisions = {method['name']: [] for method in methods}
 
