@@ -5,6 +5,7 @@ from tqdm import tqdm
 from dotenv import load_dotenv
 from backend.app.db.connect_db import DatabaseConnection
 from backend.app.evals.eval_methods import EvalMethods
+from eval_utils import get_ground_truth_header, get_hypo_schema
 
 load_dotenv()
 
@@ -55,7 +56,10 @@ class Evaluator:
         if not os.path.exists(self.results_file):
             with open(self.results_file, 'w', newline='') as f:
                 writer = csv.writer(f)
-                header = ['Index', 'Table Name', 'Method', 'Query Type', 'Query', 'Precision']
+                header = [
+                    'Index', 'Table Name', 'Method', 'Query Type', 'Query',
+                    'Precision', 'Ground Truth Header', 'Hypothetical Schema'
+                ]
                 writer.writerow(header)
             logging.info(f"Initialized results file '{self.results_file}'")
 
@@ -108,7 +112,21 @@ class Evaluator:
                             results = search_function(query=query)
                             precision = self.compute_precision_at_k(results, ground_truth_table)
                             precisions[method_name].append(precision)
-                            self.save_row_result(idx, ground_truth_table, method_name, query_type, query, precision)
+
+                            # Retrieve ground truth header & hypothetical schema for HySE search
+                            ground_truth_header = ''
+                            hypo_schema = ''
+
+                            if method_name == 'HySE Search':
+                                # Retrieve ground truth header from example_rows_md
+                                ground_truth_header = get_ground_truth_header(ground_truth_table, self.data_split)
+                                # Retrieve hypothetical schema from eval_hyse_schemas
+                                hypo_schema = get_hypo_schema(query)
+
+                            self.save_row_result(
+                                idx, ground_truth_table, method_name, query_type, query, precision,
+                                ground_truth_header, hypo_schema
+                            )
                         except Exception as e:
                             logging.exception(f"Error in {method_name} with query '{query}' at index {idx}: {e}")
                             precisions[method_name].append(0)
@@ -130,11 +148,14 @@ class Evaluator:
         # Return the results
         return avg_precisions
     
-    def save_row_result(self, idx, table_name, method_name, query_type, query, precision):
+    def save_row_result(self, idx, table_name, method_name, query_type, query, precision, ground_truth_header='', hypothetical_schema=''):
         try:
             with open(self.results_file, 'a', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow([idx, table_name, method_name, query_type, query, precision])
+                writer.writerow([
+                    idx, table_name, method_name, query_type, query, precision,
+                    ground_truth_header, hypothetical_schema
+                ])
         except Exception as e:
             logging.exception(f"Error saving result for index {idx}: {e}")
 

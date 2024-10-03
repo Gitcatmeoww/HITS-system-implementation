@@ -34,3 +34,31 @@ def save_hypo_schema_to_db(query, hypo_schema, hypo_schema_embed):
             db.conn.commit()
     except Exception as e:
         logging.exception(f"Error saving hypothetical schema to DB: {e}")
+
+def get_ground_truth_header(table_name, data_split):
+    try:
+        with DatabaseConnection() as db:
+            query = f"SELECT example_rows_md FROM {data_split} WHERE table_name = %s;"
+            db.cursor.execute(query, (table_name,))
+            result = db.cursor.fetchone()
+            if result and result['example_rows_md']:
+                return result['example_rows_md']
+            else:
+                return ''
+    except Exception as e:
+        logging.exception(f"Error retrieving ground truth header for table '{table_name}': {e}")
+        return ''
+
+def get_hypo_schema(query):
+    try:
+        with DatabaseConnection() as db:
+            select_query = "SELECT hypo_schema FROM eval_hyse_schemas WHERE query = %s;"
+            db.cursor.execute(select_query, (query,))
+            result = db.cursor.fetchone()
+            if result and result['hypo_schema']:
+                return result['hypo_schema']
+            else:
+                return ''
+    except Exception as e:
+        logging.exception(f"Error retrieving hypothetical schema for query '{query}': {e}")
+        return ''
