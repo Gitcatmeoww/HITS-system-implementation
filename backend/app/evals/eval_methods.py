@@ -4,6 +4,7 @@ import logging
 from dotenv import load_dotenv
 from backend.app.evals.elastic_search.es_client import es_client
 from backend.app.hyse.hypo_schema_search import hyse_search
+from eval_utils import get_hypo_schema_from_db, save_hypo_schema_to_db
 
 load_dotenv()
 
@@ -93,14 +94,25 @@ class EvalMethods:
     
     def hyse_search(self, query, num_schema=1):
         try:
-            results = hyse_search(
-                query,
-                search_space=None,
-                num_schema=num_schema,
-                k=self.k,
-                table_name=self.data_split,
-                column_name=self.embed_col
-            )
+            # Check if existing hypothetical schema & embedding available in DB
+            hypo_schema, hypo_schema_embed = get_hypo_schema_from_db(query)
+
+            # If NOT found in cache, call the original hyse_search function
+            if hypo_schema is None or hypo_schema_embed is None:
+                results, hypo_schema, hypo_schema_embed = hyse_search(
+                    query,
+                    search_space=None,
+                    num_schema=num_schema,
+                    k=self.k,
+                    table_name=self.data_split,
+                    column_name=self.embed_col
+                )
+                # Save the schema & embedding to DB
+                save_hypo_schema_to_db(query, hypo_schema, hypo_schema_embed)
+            
+            # If FOUND in cache, perform cosine similarity search between cached embedding and e(existing_scheme_embed)
+            else:               
+                results = cos_sim_search(hypo_schema_embed, search_space=None, table_name=self.data_split, column_name=self.embed_col)
 
             # Extract only the table_name from each result
             return [result['table_name'] for result in results]

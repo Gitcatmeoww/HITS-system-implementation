@@ -106,7 +106,7 @@ def hyse_search(initial_query, search_space=None, num_schema=1, k=10, table_name
     aggregated_results.sort(key=lambda x: x['cosine_similarity'], reverse=True)
     top_k_results = aggregated_results[:k]
 
-    return top_k_results
+    return top_k_results, single_hypo_schema_json, single_hypo_schema_embedding
 
 def infer_single_hypothetical_schema(initial_query):
     prompt = format_prompt(PROMPT_SINGLE_SCHEMA, query=initial_query)

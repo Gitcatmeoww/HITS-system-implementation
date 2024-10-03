@@ -241,6 +241,31 @@ class EvalData:
 
         print("✅ Evaluation data inserted successfully from CSV files.")
 
+    def initialize_eval_hyse_schemas_table(self):
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS eval_hyse_schemas (
+            query TEXT PRIMARY KEY,
+            hypo_schema TEXT,
+            hypo_schema_embed VECTOR(1536)
+        );
+        """
+        
+        with DatabaseConnection() as db:
+            # Enable the pgvector extension
+            db.cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            db.cursor.execute(create_table_query)
+            db.conn.commit() 
+            print("✅ eval_hyse_schemas table created successfully.")
+
+            # Create index on the embedding column for efficient similarity search
+            index_query = """
+            CREATE INDEX IF NOT EXISTS hypo_schema_embed_idx
+            ON eval_hyse_schemas USING hnsw (hypo_schema_embed vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+            """
+            db.cursor.execute(index_query)
+            db.conn.commit()
+            print("✅ Index hypo_schema_embed_idx created successfully.")
+
 def main():
     try:
         # # Initialize database
@@ -255,6 +280,7 @@ def main():
         # Insert evaluation data
         eval_data = EvalData(openai_client)
         eval_data.insert_eval_data()
+        eval_data.initialize_eval_hyse_schemas_table()
     except Exception as e:
         print(f"An error occurred: {e}")
         raise
