@@ -87,7 +87,7 @@ class Evaluator:
     def evaluate(self):
         # Initialize performance metrics
         methods = [
-            {'name': 'HySE Search', 'function': self.eval_methods.hyse_search, 'query_type': 'task'},
+            {'name': 'HySE Search', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task'},
             {'name': 'Semantic Task Search', 'function': self.eval_methods.semantic_search, 'query_type': 'task'},
             {'name': 'Semantic Keyword Search', 'function': self.eval_methods.semantic_search, 'query_type': 'keyword'},
             # {'name': 'Syntactic Keyword Search', 'function': self.eval_methods.syntactic_search, 'query_type': 'keyword'}
@@ -181,7 +181,7 @@ if __name__ == "__main__":
         data_split="eval_data_validation",
         embed_col="example_rows_embed",
         k=10,
-        limit=2
+        limit=150
     )
 
     results = evaluator.evaluate()

@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import List, Any
 import random
 import logging
+import numpy as np
 
 # Initialize OpenAI client
 openai_client = OpenAIClient()
@@ -135,6 +136,14 @@ def infer_multiple_hypothetical_schema(initial_query, num_left):
     return response, m
 
 def cos_sim_search(input_embedding, search_space, table_name="corpus_raw_metadata_with_embedding", column_name="comb_embed"):  
+    # Ensure input_embedding is a list before passing to execute
+    if isinstance(input_embedding, np.ndarray):
+        input_embedding = input_embedding.tolist()
+    elif isinstance(input_embedding, list):
+        input_embedding = input_embedding
+    else:
+        input_embedding = list(input_embedding)
+    
     with DatabaseConnection() as db:
         if search_space:
             # Filter by specific table names

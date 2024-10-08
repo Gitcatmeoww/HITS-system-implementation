@@ -244,9 +244,11 @@ class EvalData:
     def initialize_eval_hyse_schemas_table(self):
         create_table_query = """
         CREATE TABLE IF NOT EXISTS eval_hyse_schemas (
-            query TEXT PRIMARY KEY,
+            query TEXT NOT NULL,
+            hypo_schema_id SERIAL,
             hypo_schema TEXT,
-            hypo_schema_embed VECTOR(1536)
+            hypo_schema_embed VECTOR(1536),
+            PRIMARY KEY (query, hypo_schema_id)
         );
         """
         
