@@ -12,11 +12,12 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class Evaluator:
-    def __init__(self, data_split="eval_data_validation", embed_col="example_rows_embed", k=10, limit=None):
+    def __init__(self, data_split="eval_data_validation", embed_col="example_rows_embed", k=10, limit=None, num_embed=1):
         self.data_split = data_split
         self.embed_col = embed_col
         self.k = k
         self.limit = limit
+        self.num_embed = num_embed
         self.eval_methods = EvalMethods(data_split=data_split, embed_col=embed_col, k=k)
         self.db_connection = DatabaseConnection()
         self.ground_truths = []
@@ -109,7 +110,11 @@ class Evaluator:
 
                     for query in queries:
                         try:
-                            results = search_function(query=query)
+                            if method_name == 'HySE Search':
+                                # Pass `num_embed`` parameter
+                                results = search_function(query=query, num_embed=self.num_embed)
+                            else:        
+                                results = search_function(query=query)
                             precision = self.compute_precision_at_k(results, ground_truth_table)
                             precisions[method_name].append(precision)
 
@@ -181,7 +186,8 @@ if __name__ == "__main__":
         data_split="eval_data_validation",
         embed_col="example_rows_embed",
         k=10,
-        limit=150
+        limit=150,
+        num_embed=2
     )
 
     results = evaluator.evaluate()
