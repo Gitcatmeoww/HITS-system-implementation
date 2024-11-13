@@ -26,5 +26,8 @@ __pycache__/
 /frontend/my-app/yarn-debug.log*
 /frontend/my-app/yarn-error.log*
 
-# Evaluation Temp Results
+# Evaluation Temp Results 
 /eval/results
+
+# Evaluation data backup
+eval/eval_data_processed_backup
