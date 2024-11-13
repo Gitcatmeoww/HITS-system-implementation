@@ -138,8 +138,13 @@ class EvalMethods:
                 # Combine cached & new embeddings
                 cached_embeddings.extend(new_embeddings)
 
+            # Generate embedding for the original query
+            query_embedding = generate_embeddings([query])[0]
+            # Combine query embedding with cached embeddings for hypothetical schemas
+            combined_embedding = [query_embedding] + cached_embeddings
             # Average the embeddings
-            avg_embedding = average_embeddings(cached_embeddings)
+            avg_embedding = average_embeddings(combined_embedding)
+
             # Perform similarity search between the averaged embedding and e(existing_scheme_embed)
             results = cos_sim_search(avg_embedding, search_space=None, table_name=self.data_split, column_name=self.embed_col)
             
@@ -148,6 +153,10 @@ class EvalMethods:
         except Exception as e:
             logging.exception(f"Error during single hyse search: {e}")
             return []
+    
+    # TODO: Multi-hyse implementation
+    def multi_hyse_search(self, query):
+        pass
 
 
 if __name__ == "__main__":
