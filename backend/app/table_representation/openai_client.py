@@ -17,7 +17,7 @@ class OpenAIClient:
             api_version="2024-10-01-preview"
         ) 
         self.text_generation_model_default = "gpt-4o-mini"
-        self.embedding_model_default = "gpt-4-embed-ada-model"
+        self.embedding_model_default = "text-embedding-3-small"
 
     def infer_metadata(self, messages, response_model, model=None):
         if model is None:

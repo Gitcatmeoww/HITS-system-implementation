@@ -6,6 +6,9 @@ from typing import List, Any
 import random
 import logging
 import numpy as np
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Initialize OpenAI client
 openai_client = OpenAIClient()

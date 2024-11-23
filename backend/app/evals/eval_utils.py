@@ -4,6 +4,9 @@ from backend.app.hyse.hypo_schema_search import infer_single_hypothetical_schema
 from backend.app.table_representation.openai_client import OpenAIClient
 import numpy as np
 import json
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # OpenAI client instantiation
 openai_client = OpenAIClient()

@@ -111,7 +111,7 @@ class Evaluator:
                     for query in queries:
                         try:
                             if method_name == 'HySE Search':
-                                # Pass `num_embed`` parameter
+                                # Pass `num_embed` parameter
                                 results = search_function(query=query, num_embed=self.num_embed)
                             else:        
                                 results = search_function(query=query)

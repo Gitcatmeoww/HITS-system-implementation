@@ -31,3 +31,9 @@ __pycache__/
 
 # Evaluation data backup
 eval/eval_data_processed_backup
+
+# Evaluation data CSV format
+eval/eval_data_processed/eval_data_all.csv
+eval/eval_data_processed/eval_data_test.csv
+eval/eval_data_processed/eval_data_train.csv
+eval/eval_data_processed/eval_data_validation.csv
