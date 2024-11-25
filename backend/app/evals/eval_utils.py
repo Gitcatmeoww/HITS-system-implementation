@@ -62,6 +62,54 @@ def get_hypo_schemas_from_db(query, num_embed):
         logging.exception(f"Error retrieving hypothetical schemas from DB: {e}")
         return [], []
 
+def get_query_embedding_from_db(query):
+    try:
+        with DatabaseConnection() as db:
+            select_query = """
+            SELECT query_embed FROM eval_query_embeds
+            WHERE query = %s;
+            """
+            db.cursor.execute(select_query, (query,))
+            result = db.cursor.fetchone()
+            if result:
+                if isinstance(result['query_embed'], str):
+                    query_embedding = json.loads(result['query_embed'])
+                elif isinstance(result['query_embed'], list):
+                    query_embedding = result['query_embed']
+                else:
+                    query_embedding = result['query_embed']
+                
+                # Convert to NumPy array
+                return np.array(query_embedding, dtype=float)
+            return None
+    except Exception as e:
+        logging.exception(f"Error retrieving query embedding from DB: {e}")
+        return None
+    
+def get_keyword_embedding_from_db(keyword):
+    try:
+        with DatabaseConnection() as db:
+            select_query = """
+            SELECT keyword_embed FROM eval_keyword_embeds
+            WHERE keyword = %s;
+            """
+            db.cursor.execute(select_query, (keyword,))
+            result = db.cursor.fetchone()
+            if result:
+                if isinstance(result['keyword_embed'], str):
+                    keyword_embedding = json.loads(result['keyword_embed'])
+                elif isinstance(result['keyword_embed'], list):
+                    keyword_embedding = result['keyword_embed']
+                else:
+                    keyword_embedding = result['keyword_embed']
+                
+                # Convert to NumPy array
+                return np.array(keyword_embedding, dtype=float)
+            return None
+    except Exception as e:
+        logging.exception(f"Error retrieving keyword embedding from DB: {e}")
+        return None
+
 def save_hypo_schema_to_db(query, hypo_schema, hypo_schema_embed):
     try:
         with DatabaseConnection() as db:
@@ -93,6 +141,38 @@ def save_hypo_schemas_to_db(query, schemas, embeddings):
             db.conn.commit()
     except Exception as e:
         logging.exception(f"Error saving hypothetical schemas to DB: {e}")
+    
+def save_query_embedding_to_db(query, query_embedding):
+    try:
+        with DatabaseConnection() as db:
+            insert_query = """
+            INSERT INTO eval_query_embeds (query, query_embed)
+            VALUES (%s, %s)
+            ON CONFLICT (query) DO NOTHING;
+            """
+            # Ensure query_embedding is a list
+            if isinstance(query_embedding, np.ndarray):
+                query_embedding = query_embedding.tolist()
+            db.cursor.execute(insert_query, (query, query_embedding))
+            db.conn.commit()
+    except Exception as e:
+        logging.exception(f"Error saving query embedding to DB: {e}")
+
+def save_keyword_embedding_to_db(keyword, keyword_embedding):
+    try:
+        with DatabaseConnection() as db:
+            insert_query = """
+            INSERT INTO eval_keyword_embeds (keyword, keyword_embed)
+            VALUES (%s, %s)
+            ON CONFLICT (keyword) DO NOTHING;
+            """
+            # Ensure keyword_embedding is a list
+            if isinstance(keyword_embedding, np.ndarray):
+                keyword_embedding = keyword_embedding.tolist()
+            db.cursor.execute(insert_query, (keyword, keyword_embedding))
+            db.conn.commit()
+    except Exception as e:
+        logging.exception(f"Error saving keyword embeddings to DB: {e}")
 
 def get_ground_truth_header(table_name, data_split):
     try:

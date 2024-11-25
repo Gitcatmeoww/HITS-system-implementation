@@ -114,7 +114,7 @@ class Evaluator:
                                 # Pass `num_embed` parameter
                                 results = search_function(query=query, num_embed=self.num_embed)
                             else:        
-                                results = search_function(query=query)
+                                results = search_function(query=query, query_type=query_type)
                             precision = self.compute_precision_at_k(results, ground_truth_table)
                             precisions[method_name].append(precision)
 
@@ -185,9 +185,9 @@ if __name__ == "__main__":
     evaluator = Evaluator(
         data_split="eval_data_validation",
         embed_col="example_rows_embed",
-        k=10,
+        k=20,
         limit=150,
-        num_embed=2
+        num_embed=1
     )
 
     results = evaluator.evaluate()

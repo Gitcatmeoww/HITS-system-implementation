@@ -4,7 +4,7 @@ import logging
 from dotenv import load_dotenv
 # from backend.app.evals.elastic_search.es_client import es_client
 from backend.app.hyse.hypo_schema_search import hyse_search
-from eval_utils import get_hypo_schema_from_db, save_hypo_schema_to_db, get_hypo_schemas_from_db, save_hypo_schemas_to_db, generate_hypothetical_schemas, generate_embeddings, average_embeddings
+from eval_utils import get_hypo_schema_from_db, save_hypo_schema_to_db, get_hypo_schemas_from_db, save_hypo_schemas_to_db, generate_hypothetical_schemas, generate_embeddings, average_embeddings, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db
 
 load_dotenv()
 
@@ -21,11 +21,28 @@ class EvalMethods:
         self.embed_col = embed_col
         self.k = k
 
-    # Evaluate semantic keywords search & semantic task search against HySE
-    def semantic_search(self, query):
-        try:
-            # Step 1: Generate embedding for the query (keyword / task)
-            query_embedding = self.openai_client.generate_embeddings(text=query)
+    # Evaluate semantic keywords search & semantic task search against HySE  
+    def semantic_search(self, query, query_type="task"):
+        try:        
+            query_embedding = None
+
+            # Step 1: Get or generate embedding for the query (keyword / task)
+            if query_type == "task":
+                # Check if the query embedding is cached
+                query_embedding = get_query_embedding_from_db(query)
+                if query_embedding is None:
+                    # Generate & cache the query embedding
+                    query_embedding = generate_embeddings([query])[0]
+                    save_query_embedding_to_db(query, query_embedding)
+            elif query_type == "keyword":
+                # Check if the keyword embedding is cached
+                query_embedding = get_keyword_embedding_from_db(query)
+                if query_embedding is None:
+                    # Generate & cache the keyword embedding
+                    query_embedding = generate_embeddings([query])[0]
+                    save_keyword_embedding_to_db(query, query_embedding)
+            else:
+                raise ValueError(f"Invalid query_type: {query_type}. Must be 'task' or 'keyword'.")
 
             # Step 2: Cosine similarity search between e(query_embed) and e(existing_scheme_embed)
             semantic_results = cos_sim_search(query_embedding, search_space=None, table_name=self.data_split, column_name=self.embed_col)
@@ -119,13 +136,23 @@ class EvalMethods:
         except Exception as e:
             logging.error(f"Error during hyse search: {e}")
             return []
-    
+
     def single_hyse_search(self, query, num_embed=1):
         try:
-            # Retrieve up to `num_embed` hypothetical schemas & embeddings from cache
+            # Step 1: Retrieve cached query embedding
+            query_embedding = None
+            query_embedding = get_query_embedding_from_db(query)
+            
+            if query_embedding is None:
+                # Generate & cache query embedding if not already cached
+                query_embedding = generate_embeddings([query])[0]
+                save_query_embedding_to_db(query, query_embedding)
+            
+            # Step 2: Retrieve up to `num_embed` hypothetical schemas & embeddings from cache
             cached_schemas, cached_embeddings = get_hypo_schemas_from_db(query, num_embed)
             num_cached = len(cached_schemas)
 
+             # Step 3: Generate additional hypothetical schemas if needed
             if num_cached < num_embed:
                 # Need to generate additional hypothetical schemas
                 num_to_generate = num_embed - num_cached
@@ -138,14 +165,13 @@ class EvalMethods:
                 # Combine cached & new embeddings
                 cached_embeddings.extend(new_embeddings)
 
-            # Generate embedding for the original query
-            query_embedding = generate_embeddings([query])[0]
-            # Combine query embedding with cached embeddings for hypothetical schemas
+            # Step 4: Combine query embedding with cached embeddings for hypothetical schemas
             combined_embedding = [query_embedding] + cached_embeddings
-            # Average the embeddings
+            
+            # Step 5: Average the embeddings
             avg_embedding = average_embeddings(combined_embedding)
 
-            # Perform similarity search between the averaged embedding and e(existing_scheme_embed)
+            # Step 6: Perform similarity search between the averaged embedding and e(existing_scheme_embed)
             results = cos_sim_search(avg_embedding, search_space=None, table_name=self.data_split, column_name=self.embed_col)
             
             # Extract only the table_name from each result

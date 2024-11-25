@@ -267,6 +267,54 @@ class EvalData:
             db.cursor.execute(index_query)
             db.conn.commit()
             print("✅ Index hypo_schema_embed_idx created successfully.")
+    
+    def initialize_eval_query_embeds_table(self):
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS eval_query_embeds (
+            query TEXT NOT NULL PRIMARY KEY,
+            query_embed VECTOR(1536)
+        );
+        """
+        
+        with DatabaseConnection() as db:
+            # Enable the pgvector extension
+            db.cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            db.cursor.execute(create_table_query)
+            db.conn.commit() 
+            print("✅ eval_query_embeds table created successfully.")
+
+            # Create index on the embedding column for efficient similarity search
+            index_query = """
+            CREATE INDEX IF NOT EXISTS query_embed_idx
+            ON eval_query_embeds USING hnsw (query_embed vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+            """
+            db.cursor.execute(index_query)
+            db.conn.commit()
+            print("✅ Index query_embed_idx created successfully.")
+    
+    def initialize_eval_keyword_embeds_table(self):
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS eval_keyword_embeds (
+            keyword TEXT NOT NULL PRIMARY KEY,
+            keyword_embed VECTOR(1536)
+        );
+        """
+        
+        with DatabaseConnection() as db:
+            # Enable the pgvector extension
+            db.cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            db.cursor.execute(create_table_query)
+            db.conn.commit() 
+            print("✅ eval_keyword_embeds table created successfully.")
+
+            # Create index on the embedding column for efficient similarity search
+            index_query = """
+            CREATE INDEX IF NOT EXISTS keyword_embed_idx
+            ON eval_keyword_embeds USING hnsw (keyword_embed vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+            """
+            db.cursor.execute(index_query)
+            db.conn.commit()
+            print("✅ Index keyword_embed_idx created successfully.")
 
 def main():
     try:
@@ -281,8 +329,10 @@ def main():
 
         # Insert evaluation data
         eval_data = EvalData(openai_client)
-        eval_data.insert_eval_data()
-        eval_data.initialize_eval_hyse_schemas_table()
+        # eval_data.insert_eval_data()
+        # eval_data.initialize_eval_hyse_schemas_table()
+        eval_data.initialize_eval_query_embeds_table()
+        eval_data.initialize_eval_keyword_embeds_table()
     except Exception as e:
         print(f"An error occurred: {e}")
         raise
