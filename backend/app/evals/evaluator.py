@@ -153,6 +153,57 @@ class Evaluator:
         # Return the results
         return avg_precisions
     
+    # Evaluate retrieval precision across different weight combinations for HySE
+    def evaluate_with_weights(self, weight_step=0.1):
+        # Generate weight combinations: query_weight + hypo_weight = 1.0
+        weight_combinations = [
+            (round(i * weight_step, 2), round(1.0 - i * weight_step, 2))
+            for i in range(int(1 / weight_step) + 1)
+        ]
+
+        # Initialize results storage
+        precision_results = {f"HySE ({q_w}, {h_w})": [] for q_w, h_w in weight_combinations}
+
+        # Iterate over each query and corresponding ground truth
+        for idx, ground_truth_table in tqdm(enumerate(self.ground_truths), total=len(self.ground_truths), desc="Evaluating Weights", unit="entry"):
+            try:
+                task_queries = self.task_queries[idx]
+
+                for query in task_queries:
+                    for query_weight, hypo_weight in weight_combinations:
+                        try:
+                            # Perform HySE search with specified weights
+                            results = self.eval_methods.single_hyse_search(
+                                query=query,
+                                num_embed=self.num_embed,
+                                include_query_embed=True,
+                                query_weight=query_weight,
+                                hypo_weight=hypo_weight
+                            )
+
+                            # Compute precision @k
+                            precision = self.compute_precision_at_k(results, ground_truth_table)
+                            precision_results[f"HySE ({query_weight}, {hypo_weight})"].append(precision)
+
+                        except Exception as e:
+                            logging.exception(f"Error in weight evaluation (query: '{query}', weights: {query_weight}, {hypo_weight}): {e}")
+                            precision_results[f"HySE ({query_weight}, {hypo_weight})"].append(0)
+
+            except Exception as e:
+                logging.exception(f"Error processing row {idx} (table: {ground_truth_table}): {e}")
+
+        # Compute average precision @k for each weight combination
+        avg_precisions = {
+            weight_combo: sum(scores) / len(scores) if scores else 0
+            for weight_combo, scores in precision_results.items()
+        }
+
+        # Report the results
+        for weight_combo, avg_precision in avg_precisions.items():
+            logging.info(f"Average Precision @{self.k} for {weight_combo}: {avg_precision}")
+
+        return avg_precisions
+    
     def save_row_result(self, idx, table_name, method_name, query_type, query, precision, ground_truth_header='', hypothetical_schema=''):
         try:
             with open(self.results_file, 'a', newline='') as f:
@@ -194,3 +245,7 @@ if __name__ == "__main__":
     print("Evaluation Results:")
     for method, precision in results.items():
         print(f"{method}: {precision}")
+    
+    weight_evaluation_results = evaluator.evaluate_with_weights(weight_step=0.1)
+    for weight_combo, avg_precision in weight_evaluation_results.items():
+        print(f"{weight_combo}: Average Precision = {avg_precision}")

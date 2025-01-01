@@ -4,7 +4,7 @@ import logging
 from dotenv import load_dotenv
 # from backend.app.evals.elastic_search.es_client import es_client
 from backend.app.hyse.hypo_schema_search import hyse_search
-from eval_utils import get_hypo_schema_from_db, save_hypo_schema_to_db, get_hypo_schemas_from_db, save_hypo_schemas_to_db, generate_hypothetical_schemas, generate_embeddings, average_embeddings, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db
+from eval_utils import get_hypo_schema_from_db, save_hypo_schema_to_db, get_hypo_schemas_from_db, save_hypo_schemas_to_db, generate_hypothetical_schemas, generate_embeddings, average_embeddings, average_embeddings_with_weights, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db
 
 load_dotenv()
 
@@ -108,78 +108,56 @@ class EvalMethods:
         except Exception as e:
             logging.error(f"Error during syntactic search: {e}")
             return []
-    
-    def hyse_search(self, query, num_schema=1):
+
+    def single_hyse_search(self, query, num_embed=1, include_query_embed=True, query_weight=0.5, hypo_weight=0.5):
         try:
-            # Check if existing hypothetical schema & embedding available in DB
-            hypo_schema, hypo_schema_embed = get_hypo_schema_from_db(query)
-
-            # If NOT found in cache, call the original hyse_search function
-            if hypo_schema is None or hypo_schema_embed is None:
-                results, hypo_schema, hypo_schema_embed = hyse_search(
-                    query,
-                    search_space=None,
-                    num_schema=num_schema,
-                    k=self.k,
-                    table_name=self.data_split,
-                    column_name=self.embed_col
-                )
-                # Save the schema & embedding to DB
-                save_hypo_schema_to_db(query, hypo_schema, hypo_schema_embed)
-            
-            # If FOUND in cache, perform cosine similarity search between cached embedding and e(existing_scheme_embed)
-            else:               
-                results = cos_sim_search(hypo_schema_embed, search_space=None, table_name=self.data_split, column_name=self.embed_col)
-
-            # Extract only the table_name from each result
-            return [result['table_name'] for result in results]
-        except Exception as e:
-            logging.error(f"Error during hyse search: {e}")
-            return []
-
-    def single_hyse_search(self, query, num_embed=1):
-        try:
-            # Step 1: Retrieve cached query embedding
+            # Step 1: Retrieve cached query embedding if needed
             query_embedding = None
-            query_embedding = get_query_embedding_from_db(query)
-            
-            if query_embedding is None:
-                # Generate & cache query embedding if not already cached
-                query_embedding = generate_embeddings([query])[0]
-                save_query_embedding_to_db(query, query_embedding)
-            
-            # Step 2: Retrieve up to `num_embed` hypothetical schemas & embeddings from cache
+            if include_query_embed:
+                query_embedding = get_query_embedding_from_db(query)
+                if query_embedding is None:
+                    # Generate & cache query embedding if not already cached
+                    query_embedding = generate_embeddings([query])[0]
+                    save_query_embedding_to_db(query, query_embedding)
+
+            # Step 2: Retrieve hypothetical schemas & embeddings from cache
             cached_schemas, cached_embeddings = get_hypo_schemas_from_db(query, num_embed)
             num_cached = len(cached_schemas)
 
-             # Step 3: Generate additional hypothetical schemas if needed
+            # Step 3: Generate additional hypothetical schemas if needed
             if num_cached < num_embed:
-                # Need to generate additional hypothetical schemas
                 num_to_generate = num_embed - num_cached
-                # Generate `num_to_generate` hypothetical schemas & embeddings
                 new_schemas = generate_hypothetical_schemas(query, num_to_generate)
                 new_embeddings = generate_embeddings(new_schemas)
 
                 # Save new schemas & embeddings to DB
                 save_hypo_schemas_to_db(query, new_schemas, new_embeddings)
+
                 # Combine cached & new embeddings
                 cached_embeddings.extend(new_embeddings)
 
-            # Step 4: Combine query embedding with cached embeddings for hypothetical schemas
-            combined_embedding = [query_embedding] + cached_embeddings
-            
+            # Step 4: Combine embeddings based on the include_query_embedding flag
+            combined_embeddings = cached_embeddings
+            if include_query_embed and query_embedding is not None:
+                combined_embeddings = [query_embedding] + cached_embeddings
+
             # Step 5: Average the embeddings
-            avg_embedding = average_embeddings(combined_embedding)
+            avg_embedding = average_embeddings_with_weights(
+                combined_embeddings,
+                query_weight=query_weight,
+                hypo_weight=hypo_weight
+            )
 
             # Step 6: Perform similarity search between the averaged embedding and e(existing_scheme_embed)
             results = cos_sim_search(avg_embedding, search_space=None, table_name=self.data_split, column_name=self.embed_col)
-            
-            # Extract only the table_name from each result
-            return [result['table_name'] for result in results]
+
+            # Step 7: Extract and return only the table names of the top-k results
+            top_k_results = [result['table_name'] for result in results[:self.k]]
+            return top_k_results
         except Exception as e:
             logging.exception(f"Error during single hyse search: {e}")
             return []
-    
+
     # TODO: Multi-hyse implementation
     def multi_hyse_search(self, query):
         pass

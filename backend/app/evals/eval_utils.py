@@ -234,3 +234,9 @@ def average_embeddings(embeddings):
     embeddings = [np.array(embed, dtype=float) if not isinstance(embed, np.ndarray) else embed.astype(float) for embed in embeddings]
     avg_embedding = np.mean(embeddings, axis=0)
     return avg_embedding
+
+def average_embeddings_with_weights(embeddings, query_weight, hypo_weight):
+    query_embedding = embeddings[0]
+    hypo_embeddings = embeddings[1:]
+    avg_embedding = (query_weight * query_embedding + hypo_weight * np.mean(hypo_embeddings, axis=0))
+    return avg_embedding
