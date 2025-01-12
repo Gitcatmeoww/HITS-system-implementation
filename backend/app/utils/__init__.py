@@ -1,1 +1,1 @@
-from .utils import format_prompt, run_sql_file, extract_time_geo_granularity, format_cos_sim_results, clean_json_string, validate_and_load_json, extract_granularities, load_json_file, get_finer_granularities, parse_list_column, parse_json_column
+from .utils import format_prompt, run_sql_file, extract_time_geo_granularity, format_cos_sim_results, clean_json_string, validate_and_load_json, extract_granularities, load_json_file, get_finer_granularities, parse_list_column, parse_json_column, parse_vector_column

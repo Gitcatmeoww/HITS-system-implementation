@@ -16,6 +16,7 @@ def get_db_connection():
             port=os.getenv('DB_PORT'),
             cursor_factory=RealDictCursor
         )
+        # print(f"Connected to database: {os.getenv('EVAL_DB_NAME')}")
         return connection
     except Exception as error:
         print(f"Error connecting to the database: {error}")
@@ -36,3 +37,10 @@ class DatabaseConnection:
         self.cursor.close()
         self.conn.close()
 
+
+if __name__ == "__main__":
+    try:
+        with DatabaseConnection() as db:
+            print("Database connection established successfully.")
+    except Exception as e:
+        print(f"Failed to connect: {e}")

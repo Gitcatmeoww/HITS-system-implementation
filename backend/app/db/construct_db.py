@@ -4,7 +4,7 @@ import pandas as pd
 from backend.app.utils import run_sql_file
 from connect_db import DatabaseConnection
 from backend.app.table_representation.openai_client import OpenAIClient
-from backend.app.utils import parse_list_column, parse_json_column
+from backend.app.utils import parse_list_column, parse_json_column, parse_vector_column
 from psycopg2.extras import Json
 import tiktoken
 
@@ -49,10 +49,10 @@ class EvalData:
         self.openai_client = openai_client
         # Mapping of CSV files to table names
         self.csv_table_mapping = {
-            'eval_data.csv': 'eval_data_all',
-            'test_data.csv': 'eval_data_test',
-            'train_data.csv': 'eval_data_train',
-            'val_data.csv': 'eval_data_validation'
+            'eval_data_all.csv': 'eval_data_all',
+            'eval_data_test.csv': 'eval_data_test',
+            'eval_data_train.csv': 'eval_data_train',
+            'eval_data_validation.csv': 'eval_data_validation'
         }
         # Path to the CSV files directory
         self.csv_files_path = 'eval/eval_data_processed'
@@ -241,6 +241,87 @@ class EvalData:
 
         print("✅ Evaluation data inserted successfully from CSV files.")
 
+    def insert_preprocessed_eval_data(self):
+        with DatabaseConnection() as db:
+            # Enable the pgvector extension
+            db.cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            db.conn.commit()
+            print("✅ pgvector extension enabled successfully.")
+
+            for csv_file, table_name in self.csv_table_mapping.items():
+                csv_file_path = os.path.join(self.csv_files_path, csv_file)
+                if not os.path.exists(csv_file_path):
+                    print(f"CSV file {csv_file_path} does not exist.")
+                    continue
+
+                print(f"⏳ Processing {csv_file_path} into table {table_name}.")
+
+                # Create the table if it does not exist
+                self.create_table_if_not_exists(db, table_name)
+
+                # Read the CSV file
+                df = pd.read_csv(csv_file_path)
+
+                # Prepare the insert query
+                insert_query = f'''
+                INSERT INTO {table_name} (
+                    table_name,
+                    database_name,
+                    example_rows_md,
+                    time_granu,
+                    geo_granu,
+                    db_description,
+                    col_num,
+                    row_num,
+                    popularity,
+                    usability_rating,
+                    tags,
+                    file_size_in_byte,
+                    keywords,
+                    task_queries,
+                    metadata_queries,
+                    example_rows_embed
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                '''
+
+                # Iterate over rows in the DataFrame
+                data_to_insert = []
+                for index, row in df.iterrows():
+                    try:
+                        # Map CSV columns to table columns
+                        data_to_insert.append((
+                            row['table_name'],
+                            row['database_name'],
+                            row['example_rows_md'],
+                            row['time_granu'],
+                            row['geo_granu'],
+                            row['db_description'],
+                            int(row['col_num']) if row['col_num'] is not None else None,
+                            int(row['row_num']) if row['row_num'] is not None else None,
+                            int(row['popularity']) if row['popularity'] is not None else None,
+                            float(row['usability_rating']) if row['usability_rating'] is not None else None,
+                            parse_list_column(row['tags']),
+                            int(row['file_size_in_byte']) if row['file_size_in_byte'] is not None else None,
+                            parse_list_column(row['keywords']),
+                            parse_list_column(row['task_queries']),
+                            Json(parse_json_column(row['metadata_queries'])),
+                            parse_vector_column(row['example_rows_embed'])
+                        ))
+                    except Exception as e:
+                        print(f"Error processing row {index} in file {csv_file_path}: {e}")
+                        continue
+
+                # Batch insert the data
+                if data_to_insert:
+                    db.cursor.executemany(insert_query, data_to_insert)
+                    db.conn.commit()
+                    print(f"✅ Data from {csv_file_path} inserted into {table_name}.")
+                else:
+                    print(f"No valid rows found in {csv_file_path}.")
+
+        print("✅ Preprocessed evaluation data insertion completed.")
+
     def initialize_eval_hyse_schemas_table(self):
         create_table_query = """
         CREATE TABLE IF NOT EXISTS eval_hyse_schemas (
@@ -330,7 +411,8 @@ def main():
         # Insert evaluation data
         eval_data = EvalData(openai_client)
         # eval_data.insert_eval_data()
-        # eval_data.initialize_eval_hyse_schemas_table()
+        eval_data.insert_preprocessed_eval_data()
+        eval_data.initialize_eval_hyse_schemas_table()
         eval_data.initialize_eval_query_embeds_table()
         eval_data.initialize_eval_keyword_embeds_table()
     except Exception as e:

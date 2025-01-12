@@ -126,6 +126,12 @@ def parse_list_column(column_value):
     if pd.isna(column_value):
         return []
     try:
+        # Handle PostgreSQL array-style strings like '{item1, item2}'
+        if column_value.startswith('{') and column_value.endswith('}'):
+            # Remove surrounding braces and split on commas
+            items = column_value[1:-1].split(',')
+            return [item.strip().strip('"') for item in items]
+        # Handle other Python list-like strings
         parsed_value = ast.literal_eval(column_value)
         if isinstance(parsed_value, list):
             return [str(item).strip() for item in parsed_value]
@@ -140,8 +146,23 @@ def parse_json_column(column_value):
     if pd.isna(column_value):
         return None
     try:
-        parsed_value = ast.literal_eval(column_value)
-        return parsed_value
-    except Exception as e:
+        # Use `json.loads` to handle JSON parsing
+        if isinstance(column_value, str):
+            return json.loads(column_value)
+        return column_value
+    except json.JSONDecodeError as e:
         print(f"Error parsing JSON column '{column_value}': {e}")
+        return None
+    except Exception as e:
+        print(f"Unhandled error parsing JSON column '{column_value}': {e}")
+        return None
+    
+def parse_vector_column(column_value):
+    """ Parses a stringified vector into a Python list of floats """
+    if column_value is None or column_value == '':
+        return None
+    try:
+        return [float(x) for x in eval(column_value)] if isinstance(column_value, str) else column_value
+    except Exception as e:
+        print(f"Error parsing vector: {e}")
         return None
