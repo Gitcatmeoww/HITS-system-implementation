@@ -4,6 +4,7 @@ import logging
 from dotenv import load_dotenv
 # from backend.app.evals.elastic_search.es_client import es_client
 from backend.app.hyse.hypo_schema_search import hyse_search
+from backend.app.actions.infer_action import infer_mentioned_metadata_fields, text_to_sql, execute_sql
 from eval_utils import get_hypo_schema_from_db, save_hypo_schema_to_db, get_hypo_schemas_from_db, save_hypo_schemas_to_db, generate_hypothetical_schemas, generate_embeddings, average_embeddings, average_embeddings_with_weights, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db
 
 load_dotenv()
@@ -109,7 +110,7 @@ class EvalMethods:
             logging.error(f"Error during syntactic search: {e}")
             return []
 
-    def single_hyse_search(self, query, num_embed=1, include_query_embed=True, query_weight=0.5, hypo_weight=0.5):
+    def single_hyse_search(self, query, num_embed=1, include_query_embed=True, query_weight=0.5, hypo_weight=0.5, return_embedding=False, search_space=None):
         try:
             # Step 1: Retrieve cached query embedding if needed
             query_embedding = None
@@ -148,8 +149,12 @@ class EvalMethods:
                 hypo_weight=hypo_weight
             )
 
+            if return_embedding:
+                # Just return the HySE embedding, do not perform retrieval
+                return avg_embedding
+
             # Step 6: Perform similarity search between the averaged embedding and e(existing_scheme_embed)
-            results = cos_sim_search(avg_embedding, search_space=None, table_name=self.data_split, column_name=self.embed_col)
+            results = cos_sim_search(avg_embedding, search_space=search_space, table_name=self.data_split, column_name=self.embed_col)
 
             # Step 7: Extract and return only the table names of the top-k results
             top_k_results = [result['table_name'] for result in results[:self.k]]
@@ -161,6 +166,28 @@ class EvalMethods:
     # TODO: Multi-hyse implementation
     def multi_hyse_search(self, query):
         pass
+
+    def metadata_search(self, metadata_query, search_space):
+        try:    
+            # Step 1: Infer which fields the query is referencing (tags, col_num, row_num, time_granu, geo_granu)
+            inferred_raw_fields = infer_mentioned_metadata_fields(
+                cur_query=metadata_query,
+                semantic_metadata=False
+            ).get_true_fields()
+
+            # Step 2: Excute text to sql
+            sql_clauses = text_to_sql(cur_query=metadata_query, inferred_raw_fields=inferred_raw_fields)
+            results = execute_sql(
+                text_to_sql_instance=sql_clauses,
+                search_space=search_space,
+                table_name=self.data_split
+            )
+            
+            # Step 3: Extract and return only the table names of the refined results
+            return [row[0] for row in results]
+        except Exception as e:
+            logging.exception(f"Error during metadata search: {e}")
+            return []
 
 
 if __name__ == "__main__":

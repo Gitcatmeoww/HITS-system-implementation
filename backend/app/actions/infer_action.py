@@ -37,9 +37,9 @@ Identify any fields that are explicitly mentioned or strongly implied. Provide y
 
 PROMPT_RAW_METADATA_INFER = """
 Given the user's current query, analyze and determine which fields are being referenced. These fields include:
-- Table Name
-- Column Numbers
-- Popularity
+- Table Tags
+- Number of Columns
+- Number of Rows
 - Temporal Granularity
 - Geographic Granularity
 
@@ -81,9 +81,9 @@ class MentionedSemanticFields(BaseModel):
         return [field for field, value in self.model_dump().items() if value]
 
 class MentionedRawFields(BaseModel):
-    table_name: bool
+    table_tags: bool
     column_numbers: bool
-    popularity: bool
+    row_numbers: bool
     temporal_granularity: bool
     geographic_granularity: bool
 
@@ -149,13 +149,13 @@ def text_to_sql(cur_query, identified_fields):
         logging.error(f"Failed to translate text to SQL: {e}")
         raise RuntimeError("Failed to process the SQL translation.") from e
 
-def execute_sql(text_to_sql_instance, search_space):
+def execute_sql(text_to_sql_instance, search_space, table_name="corpus_raw_metadata_with_embedding"):
     field_to_column_mapping = {
-        'table_name': 'table_name',
-        'column_numbers': 'col_num',
-        'popularity': 'popularity',
-        'temporal_granularity': 'time_granu',
-        'geographic_granularity': 'geo_granu'
+        'table_tags': 'tags',  # text[] in the DB
+        'column_numbers': 'col_num',  # integer
+        'row_numbers': 'row_num',  # integer
+        'temporal_granularity': 'time_granu',  # a single text column
+        'geographic_granularity': 'geo_granu'  # also a single text column
     }
 
     # Define finer granularity levels
@@ -164,17 +164,21 @@ def execute_sql(text_to_sql_instance, search_space):
 
     with DatabaseConnection() as db:
         # Base query with initial WHERE condition for the search space
-        query_base = sql.SQL("SELECT DISTINCT table_name, popularity FROM corpus_raw_metadata_with_embedding WHERE table_name = ANY(%s)")
+        query_base = sql.SQL("SELECT DISTINCT table_name, popularity FROM {} WHERE table_name = ANY(%s)").format(
+            sql.Identifier(table_name)
+        )
         where_conditions = []  # List to hold additional conditions
         ordering = []  # List to hold ORDER BY conditions
         parameters = [search_space]  # List to hold all parameters for the SQL query
 
         for clause in text_to_sql_instance.sql_clauses:
+            # Identify which DB column we want
             db_field = field_to_column_mapping.get(clause.field.lower())
             if not db_field:
                 logging.warning(f"Error with the raw metadata field inference: {clause.field}")
                 continue
-
+            
+            # Parse the generated clause
             if 'ORDER BY' in clause.clause:
                 parts = clause.clause.split()
                 direction = parts[-1]  # Assumes format "ORDER BY field_name DESC/ASC"
@@ -182,17 +186,29 @@ def execute_sql(text_to_sql_instance, search_space):
             else:
                 operator, value = clause.clause.split(' ', 1)
                 value = value.strip("'").lower()  # Strip quotes and convert to lowercase
+
                 if db_field == 'time_granu':
                     finer_granularities = get_finer_granularities(value, time_granu_order)
-                    condition = sql.SQL("{} && %s::text[]").format(sql.Identifier(db_field))  # Uses && %s::text[] to check for array overlap
+                    # Now we check if time_granu is IN that set of granularities
+                    # e.g. time_granu = ANY('{day,week,month,quarter,year}')
+                    condition = sql.SQL("{} = ANY(%s::text[])").format(sql.Identifier(db_field))
                     where_conditions.append(condition)
                     parameters.append(finer_granularities)
+
                 elif db_field == 'geo_granu':
                     finer_granularities = get_finer_granularities(value, geo_granu_order)
-                    condition = sql.SQL("{} && %s::text[]").format(sql.Identifier(db_field))
+                    condition = sql.SQL("{} = ANY(%s::text[])").format(sql.Identifier(db_field))
                     where_conditions.append(condition)
                     parameters.append(finer_granularities)
+                
+                elif db_field == 'tags':
+                    condition = sql.SQL("{} @> %s::text[]").format(sql.Identifier(db_field))
+                    where_conditions.append(condition)
+                    parameters.append([value])  # single-value array
+                    
                 else:
+                    # Basic numeric/string columns (col_num, row_num, etc.)
+                    # e.g. "col_num > 10"
                     condition = sql.SQL("{} {} %s").format(sql.Identifier(db_field), sql.SQL(operator))
                     where_conditions.append(condition)
                     parameters.append(value)  # Add value to parameters list
@@ -202,7 +218,8 @@ def execute_sql(text_to_sql_instance, search_space):
             query_base = query_base + sql.SQL(" AND ") + sql.SQL(" AND ").join(where_conditions)
         if ordering:
             query_base = query_base + sql.SQL(" ORDER BY ") + sql.Composed(ordering)
-
+        
+        # Debug: Log the final SQL statement
         logging.info("🏃Executing query: %s", query_base.as_string(db.conn))
 
         # Execute the query
