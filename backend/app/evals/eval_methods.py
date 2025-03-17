@@ -23,8 +23,10 @@ class EvalMethods:
         self.k = k
 
     # Evaluate semantic keywords search & semantic task search against HySE  
-    def semantic_search(self, query, query_type="task"):
-        try:        
+    def semantic_search(self, query, query_type="task", top_k=None):
+        try:
+            if top_k is None:
+                top_k = self.k      
             query_embedding = None
 
             # Step 1: Get or generate embedding for the query (keyword / task)
@@ -49,7 +51,7 @@ class EvalMethods:
             semantic_results = cos_sim_search(query_embedding, search_space=None, table_name=self.data_split, column_name=self.embed_col)
 
             # Extract and return only the table names of the top k results
-            top_k_results = [result['table_name'] for result in semantic_results[:self.k]]
+            top_k_results = [result['table_name'] for result in semantic_results[:top_k]]
             return top_k_results
         except Exception as e:
             logging.error(f"Error during semantic search: {e}")
@@ -110,8 +112,11 @@ class EvalMethods:
             logging.error(f"Error during syntactic search: {e}")
             return []
 
-    def single_hyse_search(self, query, num_embed=1, include_query_embed=True, query_weight=0.5, hypo_weight=0.5, return_embedding=False, search_space=None):
+    def single_hyse_search(self, query, num_embed=1, include_query_embed=True, query_weight=0.5, hypo_weight=0.5, return_embedding=False, search_space=None, top_k=None):
         try:
+            if top_k is None:
+                top_k = self.k
+
             # Step 1: Retrieve cached query embedding if needed
             query_embedding = None
             if include_query_embed:
@@ -157,7 +162,7 @@ class EvalMethods:
             results = cos_sim_search(avg_embedding, search_space=search_space, table_name=self.data_split, column_name=self.embed_col)
 
             # Step 7: Extract and return only the table names of the top-k results
-            top_k_results = [result['table_name'] for result in results[:self.k]]
+            top_k_results = [result['table_name'] for result in results[:top_k]]
             return top_k_results
         except Exception as e:
             logging.exception(f"Error during single hyse search: {e}")
@@ -175,16 +180,22 @@ class EvalMethods:
                 semantic_metadata=False
             ).get_true_fields()
 
+            # logging.info(f"Inferred raw fields for query '{metadata_query}': {inferred_raw_fields}")
+
             # Step 2: Excute text to sql
-            sql_clauses = text_to_sql(cur_query=metadata_query, inferred_raw_fields=inferred_raw_fields)
+            sql_clauses = text_to_sql(cur_query=metadata_query, identified_fields=inferred_raw_fields)
+
+            # for clause in sql_clauses.sql_clauses:
+            #     logging.info(f"SQL Clause => field: {clause.field}, clause: {clause.clause}")
+
             results = execute_sql(
                 text_to_sql_instance=sql_clauses,
                 search_space=search_space,
                 table_name=self.data_split
             )
-            
+  
             # Step 3: Extract and return only the table names of the refined results
-            return [row[0] for row in results]
+            return [row["table_name"] for row in results]
         except Exception as e:
             logging.exception(f"Error during metadata search: {e}")
             return []
