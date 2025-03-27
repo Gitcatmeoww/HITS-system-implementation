@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 # from backend.app.evals.elastic_search.es_client import es_client
 from backend.app.hyse.hypo_schema_search import hyse_search
 from backend.app.actions.infer_action import infer_mentioned_metadata_fields, text_to_sql, execute_sql
-from eval_utils import get_hypo_schema_from_db, save_hypo_schema_to_db, get_hypo_schemas_from_db, save_hypo_schemas_to_db, generate_hypothetical_schemas, generate_embeddings, average_embeddings, average_embeddings_with_weights, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db
+from eval_utils import generate_embeddings, average_embeddings_with_weights, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db, retrieve_or_generate_schemas
 
 load_dotenv()
 
@@ -111,8 +111,19 @@ class EvalMethods:
         except Exception as e:
             logging.error(f"Error during syntactic search: {e}")
             return []
-
-    def single_hyse_search(self, query, num_embed=1, include_query_embed=True, query_weight=0.5, hypo_weight=0.5, return_embedding=False, search_space=None, top_k=None):
+      
+    def single_hyse_search(
+        self,
+        query,
+        num_embed=1,
+        include_query_embed=True,
+        query_weight=0.5,
+        hypo_weight=0.5,
+        return_embedding=False,
+        search_space=None,
+        top_k=None,
+        schema_approach="relational",
+    ):
         try:
             if top_k is None:
                 top_k = self.k
@@ -126,46 +137,73 @@ class EvalMethods:
                     query_embedding = generate_embeddings([query])[0]
                     save_query_embedding_to_db(query, query_embedding)
 
-            # Step 2: Retrieve hypothetical schemas & embeddings from cache
-            cached_schemas, cached_embeddings = get_hypo_schemas_from_db(query, num_embed)
-            num_cached = len(cached_schemas)
+            # Step 2: Retrieve or generate schema embeddings
+            all_schema_embeddings = []
 
-            # Step 3: Generate additional hypothetical schemas if needed
-            if num_cached < num_embed:
-                num_to_generate = num_embed - num_cached
-                new_schemas = generate_hypothetical_schemas(query, num_to_generate)
-                new_embeddings = generate_embeddings(new_schemas)
+            if schema_approach == "relational":
+                rel_embeds = retrieve_or_generate_schemas(
+                    query=query,
+                    num_embed=num_embed,
+                    table_name="eval_hyse_schemas",
+                    schema_approach="relational"
+                )
+                all_schema_embeddings.extend(rel_embeds)
 
-                # Save new schemas & embeddings to DB
-                save_hypo_schemas_to_db(query, new_schemas, new_embeddings)
+            elif schema_approach == "non_relational":
+                non_rel_embeds = retrieve_or_generate_schemas(
+                    query=query,
+                    num_embed=num_embed,
+                    table_name="eval_hyse_schemas_non_relational",
+                    schema_approach="non_relational"
+                )
+                all_schema_embeddings.extend(non_rel_embeds)
 
-                # Combine cached & new embeddings
-                cached_embeddings.extend(new_embeddings)
+            elif schema_approach == "dual":
+                rel_embeds = retrieve_or_generate_schemas(
+                    query=query,
+                    num_embed=num_embed,
+                    table_name="eval_hyse_schemas",
+                    schema_approach="relational"
+                )
+                non_rel_embeds = retrieve_or_generate_schemas(
+                    query=query,
+                    num_embed=num_embed,
+                    table_name="eval_hyse_schemas_non_relational",
+                    schema_approach="non_relational"
+                )
+                # Combine relational & non-relational embeddings
+                all_schema_embeddings.extend(rel_embeds)
+                all_schema_embeddings.extend(non_rel_embeds)
 
-            # Step 4: Combine embeddings based on the include_query_embedding flag
-            combined_embeddings = cached_embeddings
-            if include_query_embed and query_embedding is not None:
-                combined_embeddings = [query_embedding] + cached_embeddings
+            else:
+                raise ValueError(f"Unknown schema_approach: {schema_approach}")
 
-            # Step 5: Average the embeddings
-            avg_embedding = average_embeddings_with_weights(
-                combined_embeddings,
+            # Step 3: Combine embeddings based on the include_query_embedding flag
+            combined_list = []
+            if query_embedding is not None and include_query_embed:
+                combined_list.append(query_embedding)
+            combined_list.extend(all_schema_embeddings)
+
+            # Step 4: Average the embeddings
+            final_embedding = average_embeddings_with_weights(
+                combined_list,
                 query_weight=query_weight,
                 hypo_weight=hypo_weight
             )
 
             if return_embedding:
                 # Just return the HySE embedding, do not perform retrieval
-                return avg_embedding
+                return final_embedding
 
-            # Step 6: Perform similarity search between the averaged embedding and e(existing_scheme_embed)
-            results = cos_sim_search(avg_embedding, search_space=search_space, table_name=self.data_split, column_name=self.embed_col)
-
-            # Step 7: Extract and return only the table names of the top-k results
+            # Step 5: Perform similarity search between the final averaged embedding and e(existing_scheme_embed)
+            results = cos_sim_search(final_embedding, search_space=search_space, table_name=self.data_split, column_name=self.embed_col)
+            
+            # Step 6: Extract and return only the table names of the top-k results
             top_k_results = [result['table_name'] for result in results[:top_k]]
             return top_k_results
+
         except Exception as e:
-            logging.exception(f"Error during single hyse search: {e}")
+            logging.exception(f"Error during single_hyse_search: {e}")
             return []
 
     # TODO: Multi-hyse implementation

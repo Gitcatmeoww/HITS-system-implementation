@@ -14,10 +14,27 @@ load_dotenv()
 openai_client = OpenAIClient()
 
 # Craft schema inference prompt
-PROMPT_SINGLE_SCHEMA = """
-Given the task of {query}, help me generate a database schema to to implement the task.
+# PROMPT_SINGLE_SCHEMA = """
+# Given the task of {query}, help me generate a database schema to to implement the task.
+# Only generate one table schema, excluding any introductory phrases and focusing exclusively on the tasks themselves.
+# Generate a JSON with keys as table names and values as column names, data types, and example rows. For example:
+
+# Task:
+# What data is needed to train a machine learning model to forecast demand for medicines across suppliers?
+
+# Output: 
+# {{
+#     "table_name": "Sales",
+#     "column_names": ["sale_id", "medicine_id", "supplier_id", "quantity_sold", "sale_date", "price", "region"],
+#     "data_types": ["INT", "INT", "INT", "INT", "DATE", "DECIMAL", "VARCHAR"],
+#     "example_row": [1, 101, 201, 50, "2024-06-01", 19.99, "North America"]
+# }}
+# """
+
+PROMPT_SINGLE_SCHEMA_RELATIONAL = """
+Given the task of {query}, help me generate a database schema to implement the task.
 Only generate one table schema, excluding any introductory phrases and focusing exclusively on the tasks themselves.
-Generate a JSON with keys as table names and values as column names, data types, and example rows. For example:
+Generate a JSON with keys as table names and values as column names. For example:
 
 Task:
 What data is needed to train a machine learning model to forecast demand for medicines across suppliers?
@@ -25,9 +42,22 @@ What data is needed to train a machine learning model to forecast demand for med
 Output: 
 {{
     "table_name": "Sales",
-    "column_names": ["sale_id", "medicine_id", "supplier_id", "quantity_sold", "sale_date", "price", "region"],
-    "data_types": ["INT", "INT", "INT", "INT", "DATE", "DECIMAL", "VARCHAR"],
-    "example_row": [1, 101, 201, 50, "2024-06-01", 19.99, "North America"]
+    "column_names": ["sale_id", "medicine_id", "supplier_id", "quantity_sold", "sale_date", "price", "region"]
+}}
+"""
+
+PROMPT_SINGLE_SCHEMA_NON_RELATIONAL = """
+Given the task of {query}, help me generate a database schema to implement the task.
+Only generate one table schema, excluding any introductory phrases and focusing exclusively on the tasks themselves.
+Generate a JSON with keys as table names and values as column names. For example:
+
+Task:
+What data is needed to train a machine learning model to forecast demand for medicines across suppliers?
+
+Output:
+{{
+    "table_name": "Sales",
+    "column_names": ["medicine_name", "supplier_name", "quantity_sold", "sale_date", "price", "region"]
 }}
 """
 
@@ -57,11 +87,15 @@ Output:
 
 # TODO: refactor pydantic models
 # Define desired output structure
+# class TableSchema(BaseModel):
+#     table_name: str
+#     column_names: List[str]
+#     data_types: List[str]
+#     example_row: List[Any]
+
 class TableSchema(BaseModel):
     table_name: str
     column_names: List[str]
-    data_types: List[str]
-    example_row: List[Any]
 
 def hyse_search(initial_query, search_space=None, num_schema=1, k=10, table_name="corpus_raw_metadata_with_embedding", column_name="comb_embed"):
     # Step 0: Initialize the results list and num_left
@@ -112,8 +146,8 @@ def hyse_search(initial_query, search_space=None, num_schema=1, k=10, table_name
 
     return top_k_results, single_hypo_schema_json, single_hypo_schema_embedding
 
-def infer_single_hypothetical_schema(initial_query):
-    prompt = format_prompt(PROMPT_SINGLE_SCHEMA, query=initial_query)
+def infer_single_hypothetical_schema(initial_query, prompt_template):
+    prompt = format_prompt(prompt_template=prompt_template, query=initial_query)
 
     response_model = TableSchema
 

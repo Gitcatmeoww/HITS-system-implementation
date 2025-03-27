@@ -5,7 +5,7 @@ from tqdm import tqdm
 from dotenv import load_dotenv
 from backend.app.db.connect_db import DatabaseConnection
 from backend.app.evals.eval_methods import EvalMethods
-from eval_utils import get_ground_truth_header, get_hypo_schema, generate_embeddings, get_query_embedding_from_db, save_query_embedding_to_db
+from eval_utils import get_ground_truth_header, get_hypo_schema
 from backend.app.hyse.hypo_schema_search import cos_sim_search
 
 load_dotenv()
@@ -96,7 +96,9 @@ class Evaluator:
     def evaluate(self):
         # Initialize performance metrics
         methods = [
-            {'name': 'HySE Search', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task'},
+            {'name': 'HySE Search (Relational)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'relational'},
+            {'name': 'HySE Search (Non-Relational)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'non_relational'},
+            {'name': 'HySE Search (Dual)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'dual'},
             {'name': 'Semantic Task Search', 'function': self.eval_methods.semantic_search, 'query_type': 'task'},
             {'name': 'Semantic Keyword Search', 'function': self.eval_methods.semantic_search, 'query_type': 'keyword'},
             # {'name': 'Syntactic Keyword Search', 'function': self.eval_methods.syntactic_search, 'query_type': 'keyword'}
@@ -118,9 +120,14 @@ class Evaluator:
 
                     for query in queries:
                         try:
-                            if method_name == 'HySE Search':
-                                # Pass `num_embed` parameter
-                                results = search_function(query=query, num_embed=self.num_embed)
+                            if method_name.startswith('HySE'):
+                                # Pass `num_embed` parameter, and also pass the approach
+                                schema_approach = method.get('schema_approach', 'relational')
+                                results = search_function(
+                                    query=query,
+                                    num_embed=self.num_embed,
+                                    schema_approach=schema_approach
+                                )
                             else:        
                                 results = search_function(query=query, query_type=query_type)
                             recall = self.compute_recall_at_k(results, ground_truth_table)
@@ -362,24 +369,24 @@ if __name__ == "__main__":
         data_split="eval_data_validation",
         # embed_col="example_rows_embed",
         embed_col="table_header_embed",
-        k=10,
-        limit=50,
+        k=50,
+        limit=150,
         num_embed=1
     )
 
-    # results = evaluator.evaluate()
-    # print("Evaluation Results:")
-    # for method, recall in results.items():
-    #     print(f"{method}: {recall}")
+    results = evaluator.evaluate()
+    print("Evaluation Results:")
+    for method, recall in results.items():
+        print(f"{method}: {recall}")
     
     # weight_evaluation_results = evaluator.evaluate_with_weights(weight_step=0.1)
     # for weight_combo, avg_recall in weight_evaluation_results.items():
     #     print(f"{weight_combo}: Average Recall = {avg_recall}")
 
     # Evaluate using Multi-Stage Retrieval
-    multi_stage_recall = evaluator.evaluate_multi_stage_retriever(
-                                stage1_method = "hyse",
-                                stage2_mode = "first",
-                                num_top_tables=50
-                            )
-    print(f"Multi-Stage Retrieval: Average Recall = {multi_stage_recall}")
+    # multi_stage_recall = evaluator.evaluate_multi_stage_retriever(
+    #                             stage1_method = "hyse",
+    #                             stage2_mode = "first",
+    #                             num_top_tables=50
+    #                         )
+    # print(f"Multi-Stage Retrieval: Average Recall = {multi_stage_recall}")

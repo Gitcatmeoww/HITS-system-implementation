@@ -1,6 +1,6 @@
 import logging
 from backend.app.db.connect_db import DatabaseConnection
-from backend.app.hyse.hypo_schema_search import infer_single_hypothetical_schema
+from backend.app.hyse.hypo_schema_search import infer_single_hypothetical_schema, PROMPT_SINGLE_SCHEMA_RELATIONAL, PROMPT_SINGLE_SCHEMA_NON_RELATIONAL
 from backend.app.table_representation.openai_client import OpenAIClient
 import numpy as np
 import json
@@ -15,7 +15,7 @@ def get_hypo_schema_from_db(query):
     try:
         with DatabaseConnection() as db:
             select_query = """
-            SELECT hypo_schema, hypo_schema_embed FROM eval_hyse_schemas
+            SELECT hypo_schema, hypo_schema_embed FROM eval_hyse_schemas_non_relational
             WHERE query = %s;
             """
             db.cursor.execute(select_query, (query,))
@@ -30,11 +30,12 @@ def get_hypo_schema_from_db(query):
         logging.exception(f"Error retrieving hypothetical schema from DB: {e}")
         return None, None
     
-def get_hypo_schemas_from_db(query, num_embed):
+def get_hypo_schemas_from_db(query, num_embed, table_name="eval_hyse_schemas"):
     try:
         with DatabaseConnection() as db:
-            select_query = """
-            SELECT hypo_schema, hypo_schema_embed FROM eval_hyse_schemas
+            select_query = f"""
+            SELECT hypo_schema, hypo_schema_embed
+            FROM {table_name}
             WHERE query = %s
             ORDER BY hypo_schema_id ASC
             LIMIT %s;
@@ -114,7 +115,7 @@ def save_hypo_schema_to_db(query, hypo_schema, hypo_schema_embed):
     try:
         with DatabaseConnection() as db:
             insert_query = """
-            INSERT INTO eval_hyse_schemas (query, hypo_schema, hypo_schema_embed)
+            INSERT INTO eval_hyse_schemas_non_relational (query, hypo_schema, hypo_schema_embed)
             VALUES (%s, %s, %s)
             ON CONFLICT (query) DO UPDATE SET
             hypo_schema = EXCLUDED.hypo_schema,
@@ -125,11 +126,11 @@ def save_hypo_schema_to_db(query, hypo_schema, hypo_schema_embed):
     except Exception as e:
         logging.exception(f"Error saving hypothetical schema to DB: {e}")
 
-def save_hypo_schemas_to_db(query, schemas, embeddings):
+def save_hypo_schemas_to_db(query, schemas, embeddings, table_name="eval_hyse_schemas"):
     try:
         with DatabaseConnection() as db:
-            insert_query = """
-            INSERT INTO eval_hyse_schemas (query, hypo_schema, hypo_schema_embed)
+            insert_query = f"""
+            INSERT INTO {table_name} (query, hypo_schema, hypo_schema_embed)
             VALUES (%s, %s, %s);
             """
             data = []
@@ -174,14 +175,28 @@ def save_keyword_embedding_to_db(keyword, keyword_embedding):
     except Exception as e:
         logging.exception(f"Error saving keyword embeddings to DB: {e}")
 
+# def get_ground_truth_header(table_name, data_split):
+#     try:
+#         with DatabaseConnection() as db:
+#             query = f"SELECT example_rows_md FROM {data_split} WHERE table_name = %s;"
+#             db.cursor.execute(query, (table_name,))
+#             result = db.cursor.fetchone()
+#             if result and result['example_rows_md']:
+#                 return result['example_rows_md']
+#             else:
+#                 return ''
+#     except Exception as e:
+#         logging.exception(f"Error retrieving ground truth header for table '{table_name}': {e}")
+#         return ''
+
 def get_ground_truth_header(table_name, data_split):
     try:
         with DatabaseConnection() as db:
-            query = f"SELECT example_rows_md FROM {data_split} WHERE table_name = %s;"
+            query = f"SELECT table_header FROM {data_split} WHERE table_name = %s;"
             db.cursor.execute(query, (table_name,))
             result = db.cursor.fetchone()
-            if result and result['example_rows_md']:
-                return result['example_rows_md']
+            if result and result['table_header']:
+                return result['table_header']
             else:
                 return ''
     except Exception as e:
@@ -191,7 +206,7 @@ def get_ground_truth_header(table_name, data_split):
 def get_hypo_schema(query):
     try:
         with DatabaseConnection() as db:
-            select_query = "SELECT hypo_schema FROM eval_hyse_schemas WHERE query = %s;"
+            select_query = "SELECT hypo_schema FROM eval_hyse_schemas_non_relational WHERE query = %s;"
             db.cursor.execute(select_query, (query,))
             result = db.cursor.fetchone()
             if result and result['hypo_schema']:
@@ -202,11 +217,18 @@ def get_hypo_schema(query):
         logging.exception(f"Error retrieving hypothetical schema for query '{query}': {e}")
         return ''
 
-def generate_hypothetical_schemas(query, num_to_generate):
+def generate_hypothetical_schemas(query, num_to_generate, schema_approach="relational"):
     schemas = []
     try:
+        # Pick the template based on schema_approach
+        if schema_approach == "relational":
+            prompt_template = PROMPT_SINGLE_SCHEMA_RELATIONAL
+        else:
+            prompt_template = PROMPT_SINGLE_SCHEMA_NON_RELATIONAL
+
+        # Generate the requested number of schemas
         for _ in range(num_to_generate):
-            schema = infer_single_hypothetical_schema(query).json()
+            schema = infer_single_hypothetical_schema(initial_query=query, prompt_template=prompt_template).json()
             schemas.append(schema)
         return schemas
     except Exception as e:
@@ -228,6 +250,29 @@ def generate_embeddings(schemas):
     except Exception as e:
         logging.exception(f"Error generating embeddings for schemas '{schemas}': {e}")
         return []
+
+def retrieve_or_generate_schemas(query, num_embed, table_name, schema_approach): 
+    # Fetch up to `num_embed` schemas + embeddings from `table_name`
+    cached_schemas, cached_embeddings = get_hypo_schemas_from_db(query, num_embed, table_name=table_name)
+    num_cached = len(cached_schemas)
+
+    # If not enough cached, generate more using `generate_prompt_func`
+    if num_cached < num_embed:
+        num_to_generate = num_embed - num_cached
+        new_schemas = generate_hypothetical_schemas(
+            query,
+            num_to_generate,
+            schema_approach=schema_approach
+        )
+        new_embeddings = generate_embeddings(new_schemas)
+
+        # Save new schemas & embeddings to DB
+        save_hypo_schemas_to_db(query, new_schemas, new_embeddings, table_name=table_name)
+
+        # Combine cached & new embeddings
+        cached_embeddings.extend(new_embeddings)
+
+    return cached_embeddings
     
 def average_embeddings(embeddings):
     # Ensure all embeddings are NumPy arrays of floats
