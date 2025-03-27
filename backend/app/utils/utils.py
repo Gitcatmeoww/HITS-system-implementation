@@ -125,19 +125,37 @@ def parse_list_column(column_value):
     """ Parse a string representation of a list into a Python list of strings """
     if pd.isna(column_value):
         return []
+
+    # Check if it's a "Postgres-like" curly-brace format: { ... }
+    if (isinstance(column_value, str) 
+        and column_value.startswith('{') 
+        and column_value.endswith('}')):
+        
+        # Strip the surrounding braces
+        content = column_value[1:-1].strip()
+        
+        # Split on commas that are NOT inside double quotes
+        items = re.split(r',(?=(?:[^"]*"[^"]*")*[^"]*$)', content)
+
+        parsed_items = []
+        for item in items:
+            item = item.strip()
+            # Remove surrounding double quotes if present
+            if len(item) >= 2 and item.startswith('"') and item.endswith('"'):
+                item = item[1:-1]
+            parsed_items.append(item)
+        return parsed_items
+    
+    # Otherwise, handle Python/JSON-like formats (e.g. ["item1","item2"] or just "item1")
     try:
-        # Handle PostgreSQL array-style strings like '{item1, item2}'
-        if column_value.startswith('{') and column_value.endswith('}'):
-            # Remove surrounding braces and split on commas
-            items = column_value[1:-1].split(',')
-            return [item.strip().strip('"') for item in items]
-        # Handle other Python list-like strings
         parsed_value = ast.literal_eval(column_value)
         if isinstance(parsed_value, list):
-            return [str(item).strip() for item in parsed_value]
+            return [str(elem).strip() for elem in parsed_value]
         else:
+            # If it's just a single value, wrap it in a list
             return [str(parsed_value).strip()]
     except Exception as e:
+        # Fallback: treat the entire value as a single string item
         print(f"Error parsing list column '{column_value}': {e}")
         return [str(column_value).strip()]
 
