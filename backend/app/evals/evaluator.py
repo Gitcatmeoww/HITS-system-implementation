@@ -98,7 +98,8 @@ class Evaluator:
         methods = [
             {'name': 'HySE Search (Relational)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'relational'},
             {'name': 'HySE Search (Non-Relational)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'non_relational'},
-            {'name': 'HySE Search (Dual)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'dual'},
+            {'name': 'HySE Search (Dual_Avg)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'dual_avg'},
+            {'name': 'HySE Dual Seperate Search', 'function': self.eval_methods.single_hyse_dual_separate_search, 'query_type': 'task'},
             {'name': 'Semantic Task Search', 'function': self.eval_methods.semantic_search, 'query_type': 'task'},
             {'name': 'Semantic Keyword Search', 'function': self.eval_methods.semantic_search, 'query_type': 'keyword'},
             # {'name': 'Syntactic Keyword Search', 'function': self.eval_methods.syntactic_search, 'query_type': 'keyword'}
@@ -120,7 +121,7 @@ class Evaluator:
 
                     for query in queries:
                         try:
-                            if method_name.startswith('HySE'):
+                            if method_name.startswith('HySE Search'):
                                 # Pass `num_embed` parameter, and also pass the approach
                                 schema_approach = method.get('schema_approach', 'relational')
                                 results = search_function(
@@ -128,6 +129,8 @@ class Evaluator:
                                     num_embed=self.num_embed,
                                     schema_approach=schema_approach
                                 )
+                            elif method_name == "HySE Dual Seperate Search":
+                                results = search_function(query=query)
                             else:        
                                 results = search_function(query=query, query_type=query_type)
                             recall = self.compute_recall_at_k(results, ground_truth_table)
@@ -370,7 +373,7 @@ if __name__ == "__main__":
         # embed_col="example_rows_embed",
         embed_col="table_header_embed",
         k=50,
-        limit=150,
+        limit=300,
         num_embed=1
     )
 

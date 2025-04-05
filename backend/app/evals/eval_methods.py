@@ -158,7 +158,7 @@ class EvalMethods:
                 )
                 all_schema_embeddings.extend(non_rel_embeds)
 
-            elif schema_approach == "dual":
+            elif schema_approach == "dual_avg":
                 rel_embeds = retrieve_or_generate_schemas(
                     query=query,
                     num_embed=num_embed,
@@ -205,6 +205,57 @@ class EvalMethods:
         except Exception as e:
             logging.exception(f"Error during single_hyse_search: {e}")
             return []
+
+    def single_hyse_dual_separate_search(
+        self,
+        query,
+        num_embed=1,
+        include_query_embed=True,
+        query_weight=0.5,
+        hypo_weight=0.5,
+        search_space=None,
+        top_k=None
+    ):
+        if top_k is None:
+            top_k = self.k
+
+        # Step 1: Perform single HySE search w/ RELATIONAL template
+        rel_results = self.single_hyse_search(
+            query=query,
+            num_embed=num_embed,
+            include_query_embed=include_query_embed,
+            query_weight=query_weight,
+            hypo_weight=hypo_weight,
+            return_embedding=False,
+            search_space=search_space,
+            top_k=top_k // 2,
+            schema_approach="relational"
+        )
+
+        # Step 2: Perform single HySE search w/ NON-RELATIONAL template
+        non_rel_results = self.single_hyse_search(
+            query=query,
+            num_embed=num_embed,
+            include_query_embed=include_query_embed,
+            query_weight=query_weight,
+            hypo_weight=hypo_weight,
+            return_embedding=False,
+            search_space=search_space,
+            top_k=top_k // 2,
+            schema_approach="non_relational"
+        )
+
+        # Step 3: Union both results & remove duplicates
+        combined_list = rel_results + non_rel_results
+        final_results = []
+        seen = set()
+        for tbl in combined_list:
+            if tbl not in seen:
+                final_results.append(tbl)
+                seen.add(tbl)
+
+        # Step 4: Return final results
+        return final_results
 
     # TODO: Multi-hyse implementation
     def multi_hyse_search(self, query):
