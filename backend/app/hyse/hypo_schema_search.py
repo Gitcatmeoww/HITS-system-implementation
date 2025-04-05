@@ -32,7 +32,7 @@ openai_client = OpenAIClient()
 # """
 
 PROMPT_SINGLE_SCHEMA_RELATIONAL = """
-Given the task of {query}, help me generate a database schema to implement the task.
+Given the task of {query}, help me generate a relational database schema to implement the task.
 Only generate one table schema, excluding any introductory phrases and focusing exclusively on the tasks themselves.
 Generate a JSON with keys as table names and values as column names. For example:
 
@@ -47,7 +47,7 @@ Output:
 """
 
 PROMPT_SINGLE_SCHEMA_NON_RELATIONAL = """
-Given the task of {query}, help me generate a database schema to implement the task.
+Given the task of {query}, help me generate a non-relational database schema to implement the task.
 Only generate one table schema, excluding any introductory phrases and focusing exclusively on the tasks themselves.
 Generate a JSON with keys as table names and values as column names. For example:
 
