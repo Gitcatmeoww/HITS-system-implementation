@@ -262,7 +262,7 @@ class Evaluator:
                             if stage2_mode == "first":
                                 # Only the first metadata query
                                 if meta_queries_for_this_task:
-                                    meta_query = meta_queries_for_this_task[-1]
+                                    meta_query = meta_queries_for_this_task[0]
                                     # Metadata_search returns a list of matching table names (unordered)
                                     meta_result = self.eval_methods.metadata_search(meta_query, final_candidates)
                                     # Now intersect meta_result with top_n_tables in the original order
@@ -319,6 +319,73 @@ class Evaluator:
         logging.info(f"Average Recall @{self.k} for Multi-Stage: Stage1={stage1_method}, Stage2={stage2_mode} => {avg_recall}")
         return avg_recall
 
+    def evaluate_metadata_refinement(self):
+        """
+        Evaluate the effectiveness of flexible metadata fields in narrowing down the table set
+
+        - Baseline: Use only the 'tags' metadata field from each sublist, as provided by the Kaggle dataset search filter
+        - Refined: Use a concatenation of all available metadata fields (tags, time granularity, geographical granularity, number of columns, number of rows) within each sublist
+        - Compare the sizes of the resulting table sets from both approaches
+        """
+        baseline_sizes = []
+        refined_sizes = []
+
+        logging.info(f"Total ground truths to process: {len(self.ground_truths)}")
+
+        for idx, ground_truth_table in tqdm(
+            enumerate(self.ground_truths),
+            total=len(self.ground_truths),
+            desc="Evaluating Metadata Refinement",
+            unit="entry"
+        ):
+            try:
+                meta_sublists = self.metadata_queries[idx]
+                
+                if not meta_sublists:
+                    logging.warning(f"Index {idx}: Empty meta_sublists, skipping")
+                    continue
+
+                for sublist in meta_sublists:
+                    if not sublist:
+                        logging.warning(f"Index {idx}: Empty sublist in meta_sublists, skipping")
+                        continue
+
+                    # Baseline: First metadata query ('tags' field)
+                    baseline_query = sublist[0]
+                    baseline_result = self.eval_methods.metadata_search(
+                        metadata_query=baseline_query,
+                        search_space=None
+                    )
+                    baseline_sizes.append(len(baseline_result))
+
+                    # Refined: Cncatenate all metadata fields
+                    refined_query = ". ".join(sublist)
+                    refined_result = self.eval_methods.metadata_search(
+                        metadata_query=refined_query,
+                        search_space=None
+                    )
+                    refined_sizes.append(len(refined_result))
+
+            except Exception as e:
+                logging.exception(f"Error in evaluate_metadata_refinement at index {idx} (table: {self.ground_truths[idx]}): {e}")
+
+        logging.info(f"Final baseline_sizes: {baseline_sizes}")
+        logging.info(f"Final refined_sizes: {refined_sizes}")
+
+        # Summaries
+        avg_baseline_size = sum(baseline_sizes) / len(baseline_sizes) if baseline_sizes else 0
+        avg_refined_size  = sum(refined_sizes) / len(refined_sizes) if refined_sizes else 0
+
+        logging.info(f"Metadata Baseline: avg set size = {avg_baseline_size}")
+        logging.info(f"Metadata Refined: avg set size = {avg_refined_size}")
+
+        return {
+            "avg_baseline_size": avg_baseline_size,
+            "avg_refined_size": avg_refined_size,
+            "baseline_sizes": baseline_sizes,
+            "refined_sizes": refined_sizes
+        }
+
     # Run the stage 1 method (HySE/Semantic) & returns top-N tables
     def _run_stage1_retrieval(self, stage1_method, query, num_top_tables):
         if stage1_method.lower().startswith("hyse"):
@@ -372,15 +439,15 @@ if __name__ == "__main__":
         data_split="eval_data_validation",
         # embed_col="example_rows_embed",
         embed_col="table_header_embed",
-        k=50,
+        k=10,
         limit=300,
         num_embed=1
     )
 
-    results = evaluator.evaluate()
-    print("Evaluation Results:")
-    for method, recall in results.items():
-        print(f"{method}: {recall}")
+    # results = evaluator.evaluate()
+    # print("Evaluation Results:")
+    # for method, recall in results.items():
+    #     print(f"{method}: {recall}")
     
     # weight_evaluation_results = evaluator.evaluate_with_weights(weight_step=0.1)
     # for weight_combo, avg_recall in weight_evaluation_results.items():
@@ -389,7 +456,10 @@ if __name__ == "__main__":
     # Evaluate using Multi-Stage Retrieval
     # multi_stage_recall = evaluator.evaluate_multi_stage_retriever(
     #                             stage1_method = "hyse",
-    #                             stage2_mode = "first",
+    #                             stage2_mode = "concat",
     #                             num_top_tables=50
     #                         )
     # print(f"Multi-Stage Retrieval: Average Recall = {multi_stage_recall}")
+
+    # Evaluate metadata refinement
+    metadata_refine = evaluator.evaluate_metadata_refinement()
