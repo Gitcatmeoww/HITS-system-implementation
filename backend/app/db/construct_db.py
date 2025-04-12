@@ -431,6 +431,19 @@ class EvalData:
             db.cursor.execute(index_query)
             db.conn.commit()
             print("✅ Index keyword_embed_idx created successfully.")
+    
+    def initialize_eval_metadata_sqlclauses_table(self):
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS eval_metadata_sqlclauses (
+            meta_query TEXT PRIMARY KEY,
+            clauses_json JSONB
+        );
+        """
+
+        with DatabaseConnection() as db:
+            db.cursor.execute(create_table_query)
+            db.conn.commit()
+            print("✅ eval_metadata_sqlclauses table created successfully.")
 
 def main():
     try:
@@ -448,9 +461,10 @@ def main():
         # eval_data.insert_eval_data()
         # eval_data.insert_preprocessed_eval_data()
         # eval_data.initialize_eval_hyse_schemas_table()
-        eval_data.initialize_eval_hyse_schemas_non_relational_table()
+        # eval_data.initialize_eval_hyse_schemas_non_relational_table()
         # eval_data.initialize_eval_query_embeds_table()
         # eval_data.initialize_eval_keyword_embeds_table()
+        eval_data.initialize_eval_metadata_sqlclauses_table()
     except Exception as e:
         print(f"An error occurred: {e}")
         raise

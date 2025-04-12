@@ -4,8 +4,8 @@ import logging
 from dotenv import load_dotenv
 # from backend.app.evals.elastic_search.es_client import es_client
 from backend.app.hyse.hypo_schema_search import hyse_search
-from backend.app.actions.infer_action import infer_mentioned_metadata_fields, text_to_sql, execute_sql
-from eval_utils import generate_embeddings, average_embeddings_with_weights, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db, retrieve_or_generate_schemas
+from backend.app.actions.infer_action import infer_mentioned_metadata_fields, text_to_sql, execute_sql, TextToSQL
+from eval_utils import generate_embeddings, average_embeddings_with_weights, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db, retrieve_or_generate_schemas, get_cached_metadata_sqlclauses, save_cached_metadata_sqlclauses
 
 load_dotenv()
 
@@ -262,29 +262,35 @@ class EvalMethods:
         pass
 
     def metadata_search(self, metadata_query, search_space):
-        try:    
-            # Step 1: Infer which fields the query is referencing (tags, col_num, row_num, time_granu, geo_granu)
-            inferred_raw_fields = infer_mentioned_metadata_fields(
-                cur_query=metadata_query,
-                semantic_metadata=False
-            ).get_true_fields()
+        try:
+            # Step 1: Check if we have a cached SQL translation for the metadata query
+            cached = get_cached_metadata_sqlclauses(metadata_query)
+            if cached is not None:
+                # Convert the cached dict back to a TextToSQL model
+                text_to_sql_instance = TextToSQL(**cached)
+                logging.info(f"Using cached SQL clauses for metadata query: {metadata_query}")
+            else:
+                # Step 2: If No cache entry, call the LLM pipeline
+                # Step 2.1: Infer which fields the query is referencing (tags, col_num, row_num, time_granu, geo_granu)
+                inferred_raw_fields = infer_mentioned_metadata_fields(cur_query=metadata_query, semantic_metadata=False).get_true_fields()
 
-            # logging.info(f"Inferred raw fields for query '{metadata_query}': {inferred_raw_fields}")
+                # Step 2.2: Generate structured SQL clauses
+                text_to_sql_instance = text_to_sql(cur_query=metadata_query, identified_fields=inferred_raw_fields)
 
-            # Step 2: Excute text to sql
-            sql_clauses = text_to_sql(cur_query=metadata_query, identified_fields=inferred_raw_fields)
+                # Step 2.3: Save the final clauses to the cache DB
+                save_cached_metadata_sqlclauses(metadata_query, text_to_sql_instance.model_dump())
+                logging.info(f"Saved new SQL clauses to cache for metadata query: {metadata_query}")
 
-            # for clause in sql_clauses.sql_clauses:
-            #     logging.info(f"SQL Clause => field: {clause.field}, clause: {clause.clause}")
-
+            # Step 3: Execute the final SQL clauses against the table corpus
             results = execute_sql(
-                text_to_sql_instance=sql_clauses,
+                text_to_sql_instance=text_to_sql_instance,
                 search_space=search_space,
                 table_name=self.data_split
             )
-  
-            # Step 3: Extract and return only the table names of the refined results
+
+            # Step 4: Extract and return only the table names of the refined results
             return [row["table_name"] for row in results]
+
         except Exception as e:
             logging.exception(f"Error during metadata search: {e}")
             return []

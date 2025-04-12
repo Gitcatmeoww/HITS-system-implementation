@@ -273,7 +273,40 @@ def retrieve_or_generate_schemas(query, num_embed, table_name, schema_approach):
         cached_embeddings.extend(new_embeddings)
 
     return cached_embeddings
-    
+
+def get_cached_metadata_sqlclauses(meta_query):
+    try:
+        with DatabaseConnection() as db:
+            select_query = """
+            SELECT clauses_json
+            FROM eval_metadata_sqlclauses
+            WHERE meta_query = %s
+            """
+            db.cursor.execute(select_query, (meta_query,))
+            row = db.cursor.fetchone()
+            if row:
+                clauses_dict = row['clauses_json']
+                return clauses_dict
+            return None
+    except Exception as e:
+        logging.error(f"Error retrieving cached metadata sqlclauses: {e}")
+        return None
+
+def save_cached_metadata_sqlclauses(meta_query, clauses_dict):
+    try:
+        with DatabaseConnection() as db:
+            insert_query = """
+            INSERT INTO eval_metadata_sqlclauses (meta_query, clauses_json)
+            VALUES (%s, %s)
+            ON CONFLICT (meta_query)
+            DO UPDATE SET clauses_json = EXCLUDED.clauses_json;
+            """
+            # Store `clauses_dict` as JSONB
+            db.cursor.execute(insert_query, (meta_query, json.dumps(clauses_dict)))
+            db.conn.commit()
+    except Exception as e:
+        logging.error(f"Error saving cached metadata sqlclauses: {e}")
+
 def average_embeddings(embeddings):
     # Ensure all embeddings are NumPy arrays of floats
     embeddings = [np.array(embed, dtype=float) if not isinstance(embed, np.ndarray) else embed.astype(float) for embed in embeddings]
