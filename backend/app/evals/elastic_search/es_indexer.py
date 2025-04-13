@@ -9,7 +9,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # Extract data from PostgreSQL evaluation tables & indexes it into Elasticsearch
 def index_data():
-    tables = ['eval_data_all', 'eval_data_test', 'eval_data_train', 'eval_data_validation']
+    # tables = ['eval_data_all', 'eval_data_test', 'eval_data_train', 'eval_data_validation']
+    tables = ['eval_data_validation']
     
     with DatabaseConnection() as db:
         for table in tables:
@@ -19,7 +20,8 @@ def index_data():
             es_client.create_index(table)
             
             # Fetch only the necessary fields for partial indexing
-            query = f"SELECT table_name, example_rows_md FROM {table};"
+            # query = f"SELECT table_name, example_rows_md FROM {table};"
+            query = f"SELECT table_name, table_header FROM {table};"
             db.cursor.execute(query)
             records = db.cursor.fetchall()
             

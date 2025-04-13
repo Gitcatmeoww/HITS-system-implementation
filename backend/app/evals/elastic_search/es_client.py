@@ -17,10 +17,24 @@ class SingletonMeta(type):
 # Implement ElasticSearchClient as a Singleton
 class ElasticSearchClient(metaclass=SingletonMeta):
     def __init__(self):
-        self.client = Elasticsearch(
-            os.environ['AZURE_ES_ENDPOINT'],
-            api_key=os.environ['AZURE_ES_API_KEY'],
-        )
+        # Decide which mode to use based on an environment variable ES_MODE
+        es_mode = os.getenv("ES_MODE", "local").lower()
+        
+        if es_mode == "azure":
+            azure_es_endpoint = os.environ["AZURE_ES_ENDPOINT"]
+            azure_es_api_key  = os.environ["AZURE_ES_API_KEY"]
+
+            logging.info("Using Azure Elasticsearch deployment.")
+
+            self.client = Elasticsearch(
+                azure_es_endpoint,
+                api_key=azure_es_api_key
+            )
+        else:
+            # Default: local mode
+            logging.info("Using local Elasticsearch deployment.")
+            self.client = Elasticsearch("http://localhost:9200", verify_certs=False)
+
         self.test_connection()
 
     def test_connection(self):
