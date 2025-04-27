@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from backend.app.evals.elastic_search.es_client import es_client
 from backend.app.hyse.hypo_schema_search import hyse_search
 from backend.app.actions.infer_action import infer_mentioned_metadata_fields, text_to_sql, execute_sql, TextToSQL
-from eval_utils import generate_embeddings, average_embeddings_with_weights, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db, retrieve_or_generate_schemas, get_cached_metadata_sqlclauses, save_cached_metadata_sqlclauses
+from eval_utils import generate_embeddings, average_embeddings_with_weights, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db, retrieve_or_generate_schemas, get_cached_metadata_sqlclauses, save_cached_metadata_sqlclauses, llm_rerank_tables
 
 load_dotenv()
 
@@ -215,7 +215,8 @@ class EvalMethods:
         query_weight=0.5,
         hypo_weight=0.5,
         search_space=None,
-        top_k=None
+        top_k=None,
+        use_rerank=True
     ):
         if top_k is None:
             top_k = self.k
@@ -229,7 +230,7 @@ class EvalMethods:
             hypo_weight=hypo_weight,
             return_embedding=False,
             search_space=search_space,
-            top_k=top_k // 2,
+            top_k=top_k,
             schema_approach="relational"
         )
 
@@ -242,7 +243,7 @@ class EvalMethods:
             hypo_weight=hypo_weight,
             return_embedding=False,
             search_space=search_space,
-            top_k=top_k // 2,
+            top_k=top_k,
             schema_approach="non_relational"
         )
 
@@ -255,8 +256,11 @@ class EvalMethods:
                 final_results.append(tbl)
                 seen.add(tbl)
 
-        # Step 4: Return final results
-        return final_results
+        # Step 4: Optional LLM rerank to the final top‑k
+        if use_rerank:
+            return llm_rerank_tables(query, final_results, top_k)
+        else:
+            return final_results[:top_k]
 
     # TODO: Multi-hyse implementation
     def multi_hyse_search(self, query):

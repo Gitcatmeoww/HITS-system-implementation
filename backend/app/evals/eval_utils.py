@@ -2,6 +2,8 @@ import logging
 from backend.app.db.connect_db import DatabaseConnection
 from backend.app.hyse.hypo_schema_search import infer_single_hypothetical_schema, PROMPT_SINGLE_SCHEMA_RELATIONAL, PROMPT_SINGLE_SCHEMA_NON_RELATIONAL
 from backend.app.table_representation.openai_client import OpenAIClient
+from pydantic import BaseModel
+from typing import List
 import numpy as np
 import json
 from dotenv import load_dotenv
@@ -10,6 +12,10 @@ load_dotenv()
 
 # OpenAI client instantiation
 openai_client = OpenAIClient()
+
+class RerankResult(BaseModel):
+    ranked_tables: List[str]
+
 
 def get_hypo_schema_from_db(query):
     try:
@@ -318,3 +324,40 @@ def average_embeddings_with_weights(embeddings, query_weight, hypo_weight):
     hypo_embeddings = embeddings[1:]
     avg_embedding = (query_weight * query_embedding + hypo_weight * np.mean(hypo_embeddings, axis=0))
     return avg_embedding
+
+# Re‑order `candidate_tables` via a one‑shot LLM call & return the top‑k unique table names
+def llm_rerank_tables(user_query, candidate_tables, k):
+    try:
+        if not candidate_tables:
+            return []
+
+        # Compose a compact, structured prompt
+        prompt = (
+            "You are an expert dataset search assistant. "
+            "Given the user's task and a list of candidate table names, "
+            "return the *best‑to‑worst* ordering of those names as JSON.\n\n"
+            f"Task: {user_query}\n\n"
+            f"Candidates: {json.dumps(candidate_tables)}\n\n"
+            f"Respond ONLY with a JSON object of the form: "
+            '{{"ranked_tables": ["tbl1.csv", "tbl2.csv", ...]}}'
+        )
+
+        response_model = RerankResult
+
+        messages = [
+            {"role": "system", "content": "You are an expert dataset search assistant."},
+            {"role": "user",   "content": prompt}
+        ]
+
+        result = openai_client.infer_metadata(messages, response_model)
+        ranked = [t for t in result.ranked_tables if t in candidate_tables]
+
+        # Preserve any items the model might have skipped
+        for t in candidate_tables:
+            if t not in ranked:
+                ranked.append(t)
+        return ranked[:k]
+
+    except Exception as e:
+        logging.error(f"LLM re‑ranker failed – falling back to original order. Error: {e}")
+        return candidate_tables[:k]
