@@ -1,10 +1,11 @@
 from backend.app.table_representation.openai_client import OpenAIClient
 from backend.app.hyse.hypo_schema_search import cos_sim_search
 import logging
+from copy import deepcopy
 from dotenv import load_dotenv
 from backend.app.evals.elastic_search.es_client import es_client
 from backend.app.hyse.hypo_schema_search import hyse_search
-from backend.app.actions.infer_action import infer_mentioned_metadata_fields, text_to_sql, execute_sql, TextToSQL
+from backend.app.actions.infer_action import infer_mentioned_metadata_fields, text_to_sql, execute_sql, TextToSQL, SQLClause
 from eval_utils import generate_embeddings, average_embeddings_with_weights, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db, retrieve_or_generate_schemas, get_cached_metadata_sqlclauses, save_cached_metadata_sqlclauses, llm_rerank_tables
 
 load_dotenv()
@@ -266,38 +267,109 @@ class EvalMethods:
     def multi_hyse_search(self, query):
         pass
 
-    def metadata_search(self, metadata_query, search_space):
+    def metadata_search(self, metadata_query, search_space=None, relax=True):
         try:
             # Step 1: Check if we have a cached SQL translation for the metadata query
             cached = get_cached_metadata_sqlclauses(metadata_query)
-            if cached is not None:
+            if cached:
                 # Convert the cached dict back to a TextToSQL model
                 text_to_sql_instance = TextToSQL(**cached)
-                logging.info(f"Using cached SQL clauses for metadata query: {metadata_query}")
+                logging.info(f"[MetaSearch] Cache hit for: '{metadata_query}'")
             else:
                 # Step 2: If No cache entry, call the LLM pipeline
                 # Step 2.1: Infer which fields the query is referencing (tags, col_num, row_num, time_granu, geo_granu)
-                inferred_raw_fields = infer_mentioned_metadata_fields(cur_query=metadata_query, semantic_metadata=False).get_true_fields()
+                inferred_fields = infer_mentioned_metadata_fields(
+                    cur_query=metadata_query,
+                    semantic_metadata=False
+                ).get_true_fields()
 
                 # Step 2.2: Generate structured SQL clauses
-                text_to_sql_instance = text_to_sql(cur_query=metadata_query, identified_fields=inferred_raw_fields)
+                text_to_sql_instance = text_to_sql(
+                    cur_query=metadata_query,
+                    identified_fields=inferred_fields
+                )
 
                 # Step 2.3: Save the final clauses to the cache DB
-                save_cached_metadata_sqlclauses(metadata_query, text_to_sql_instance.model_dump())
-                logging.info(f"Saved new SQL clauses to cache for metadata query: {metadata_query}")
+                save_cached_metadata_sqlclauses(
+                    metadata_query,
+                    text_to_sql_instance.model_dump()
+                )
+                logging.info(f"[MetaSearch] New translation cached for: '{metadata_query}'")
 
-            # Step 3: Execute the final SQL clauses against the table corpus
+            # Step 3: Execute strict query without relaxations
+            if not relax:
+                logging.info(f"[MetaSearch-Strict] {metadata_query} → {text_to_sql_instance.sql_clauses}")
+                results = execute_sql(
+                    text_to_sql_instance=text_to_sql_instance,
+                    search_space=search_space,
+                    table_name=self.data_split
+                )
+                return [row["table_name"] for row in results]
+
+            # Step 4: Relaxation #1 - fuzz numeric equality & split tag conjunctions
+            relaxed = deepcopy(text_to_sql_instance)
+            new_clauses = []
+
+            for clause in relaxed.sql_clauses:
+                if clause.field == "column_numbers" and clause.clause.startswith("= "):
+                    try:
+                        n = int(clause.clause.split()[1])
+                        band = max(1, round(n * 0.15))  # ±15%
+                        new_clauses.append(SQLClause(field="column_numbers", clause=f">= {n - band}"))
+                        new_clauses.append(SQLClause(field="column_numbers", clause=f"<= {n + band}"))
+                    except Exception:
+                        logging.warning(f"Could not parse numeric band from clause: {clause.clause}")
+                        new_clauses.append(clause)
+
+                elif clause.field == "row_numbers" and clause.clause.startswith("= "):
+                    try:
+                        n = int(clause.clause.split()[1])
+                        band = max(1, round(n * 0.15))
+                        new_clauses.append(SQLClause(field="row_numbers", clause=f">= {n - band}"))
+                        new_clauses.append(SQLClause(field="row_numbers", clause=f"<= {n + band}"))
+                    except Exception:
+                        logging.warning(f"Could not parse numeric band from clause: {clause.clause}")
+                        new_clauses.append(clause)
+
+                elif clause.field == "table_tags":
+                    # Split `"= 'tag1 and tag2'"` into two separate clauses
+                    tokens = [t.strip() for t in clause.clause[3:].strip("'").split(" and ")]
+                    for tok in tokens:
+                        new_clauses.append(SQLClause(field="table_tags", clause=f"= '{tok}'"))
+
+                else:
+                    new_clauses.append(clause)
+
+            relaxed.sql_clauses = new_clauses
+            logging.info(f"[MetaSearch-Loosen] Relaxed clauses: {relaxed.sql_clauses}")
+            
+            # Run the relaxed query
             results = execute_sql(
-                text_to_sql_instance=text_to_sql_instance,
+                text_to_sql_instance=relaxed,
                 search_space=search_space,
                 table_name=self.data_split
             )
+            if results:
+                return [row["table_name"] for row in results]
 
-            # Step 4: Extract and return only the table names of the refined results
+            # Step 5: Relaxation #2 — drop geo/temporal constraints
+            drop = deepcopy(relaxed)
+            drop.sql_clauses = [
+                c for c in drop.sql_clauses
+                if c.field not in {"temporal_granularity", "geographic_granularity"}
+            ]
+            logging.info(f"[MetaSearch-DropGran] Dropped granularity filters → {drop.sql_clauses}")
+            
+            # Run final relaxed query
+            results = execute_sql(
+                text_to_sql_instance=drop,
+                search_space=search_space,
+                table_name=self.data_split
+            )
             return [row["table_name"] for row in results]
 
         except Exception as e:
-            logging.exception(f"Error during metadata search: {e}")
+            logging.exception(f"[MetaSearch-Error] {e}")
             return []
 
 

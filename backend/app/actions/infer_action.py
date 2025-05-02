@@ -176,7 +176,8 @@ def text_to_sql(cur_query, identified_fields):
         logging.error(f"Failed to translate text to SQL: {e}")
         raise RuntimeError("Failed to process the SQL translation.") from e
 
-def execute_sql(text_to_sql_instance, search_space, table_name="eval_data_validation"):
+def execute_sql(text_to_sql_instance, search_space=None, table_name="eval_data_validation"):
+    # Field mapping from metadata fields to database columns
     field_to_column_mapping = {
         'table_tags': 'tags',  # text[] in the DB
         'column_numbers': 'col_num',  # integer
@@ -189,21 +190,32 @@ def execute_sql(text_to_sql_instance, search_space, table_name="eval_data_valida
     time_granu_order = ['second', 'minute', 'hour', 'day', 'week', 'month', 'quarter', 'year']
     geo_granu_order = ['zip code/postal code', 'city', 'county/district', 'state/province', 'country', 'continent']
 
+    # Helper function: returns value and all coarser granularities
+    def finer_or_coarser(value, grid):
+        value = value.lower()
+        if value not in grid:
+            return []
+        idx = grid.index(value)
+        return grid[idx:] + grid[:idx]
+
+    # Start SQL query building
     with DatabaseConnection() as db:
         # Base query: either from search_space or "WHERE 1=1"
         if search_space:
-            query_base = sql.SQL("SELECT DISTINCT table_name, popularity FROM {} WHERE table_name = ANY(%s)").format(
-                sql.Identifier(table_name)
-            )
+            query_base = sql.SQL(
+                "SELECT DISTINCT table_name, popularity FROM {} "
+                "WHERE table_name = ANY(%s)"
+            ).format(sql.Identifier(table_name))
             parameters = [search_space]
         else:
-            query_base = sql.SQL("SELECT DISTINCT table_name, popularity FROM {} WHERE 1=1").format(
-                sql.Identifier(table_name)
-            )
+            query_base = sql.SQL(
+                "SELECT DISTINCT table_name, popularity FROM {} WHERE 1=1"
+            ).format(sql.Identifier(table_name))
             parameters = []
 
         where_conditions = []
         ordering = []
+        tag_values = []
 
         for clause in text_to_sql_instance.sql_clauses:
             # Identify the DB column
@@ -212,16 +224,18 @@ def execute_sql(text_to_sql_instance, search_space, table_name="eval_data_valida
                 logging.warning(f"Unrecognized metadata field: {clause.field}")
                 continue
 
-            # Handle ORDER BY
+            # 1. Handle ORDER BY clause
             if 'ORDER BY' in clause.clause:
                 parts = clause.clause.split()
                 direction = parts[-1]  # e.g. "DESC" or "ASC"
-                ordering.append(sql.SQL("{} {}").format(sql.Identifier(db_field), sql.SQL(direction)))
+                ordering.append(
+                    sql.SQL("{} {}").format(sql.Identifier(db_field),
+                                            sql.SQL(direction)))
                 continue
 
-            # Otherwise parse operator + value
+            # 2. Parse operator and value from clause
             clause_str = clause.clause.strip()  # Remove leading/trailing spaces
-            operator_value = clause_str.split(None, 1)  # Split on whitespace
+            operator_value = clause_str.split(maxsplit=1)  # Split on whitespace
 
             if len(operator_value) == 2:
                 operator, raw_value = operator_value
@@ -233,57 +247,37 @@ def execute_sql(text_to_sql_instance, search_space, table_name="eval_data_valida
             # Strip quotes and convert to lowercase
             raw_value = raw_value.strip("'").lower().strip()
 
-            if db_field == 'time_granu':
-                # Parse time granularity
-                finer = get_finer_granularities(raw_value, time_granu_order)
-                if not finer:
-                    logging.info(f"No recognized time granularity for '{raw_value}'; skipping condition.")
-                    continue
-                # Now we check if time_granu is IN that set of granularities
-                # e.g. time_granu = ANY('{day,week,month,quarter,year}')
-                condition = sql.SQL("LOWER({}) = ANY(%s::text[])").format(sql.Identifier(db_field))
-                where_conditions.append(condition)
-                parameters.append([g.lower() for g in finer])
+            # 3. Handle tags (will be OR-combined later)
+            if db_field == 'tags':
+                tag_values.append(raw_value)
+                continue
 
-            elif db_field == 'geo_granu':
-                # Parse geographic granularity
-                finer = get_finer_granularities(raw_value, geo_granu_order)
-                if not finer:
-                    logging.info(f"No recognized geo granularity for '{raw_value}'; skipping condition.")
+            # 4. Handle granularity fields with fuzzy matching
+            if db_field in ('time_granu', 'geo_granu'):
+                grid = time_granu_order if db_field == 'time_granu' else geo_granu_order
+                valid = finer_or_coarser(raw_value, grid)
+                if not valid:
+                    logging.info(f"No recognized {db_field} for '{raw_value}'; skipping condition.")
                     continue
                 condition = sql.SQL("LOWER({}) = ANY(%s::text[])").format(sql.Identifier(db_field))
                 where_conditions.append(condition)
-                parameters.append([g.lower() for g in finer])
+                parameters.append([g.lower() for g in valid])
+                continue
 
-            elif db_field == 'tags':
-                # e.g. = 'finance'
-                if operator == '=':
-                    condition = sql.SQL("EXISTS (SELECT 1 FROM unnest({}) AS t WHERE LOWER(t) = %s)").format(
-                        sql.Identifier(db_field)
-                    )
-                    where_conditions.append(condition)
-                    parameters.append(raw_value)
-                elif operator.upper() == 'LIKE':
-                    # e.g. "LIKE 'business'"
-                    cond = sql.SQL("EXISTS (SELECT 1 FROM unnest({}) AS t WHERE LOWER(t) LIKE %s)").format(
-                        sql.Identifier(db_field)
-                    )
-                    where_conditions.append(cond)
-                    parameters.append(f"%{raw_value}%")
-                else:
-                    # Fallback: treat as =
-                    cond = sql.SQL("EXISTS (SELECT 1 FROM unnest({}) AS t WHERE LOWER(t) = %s)").format(
-                        sql.Identifier(db_field)
-                    )
-                    where_conditions.append(cond)
-                    parameters.append(raw_value)
+            # 5.  Handle numeric columns (col_num, row_num, etc.)
+            condition = sql.SQL("{} {} %s").format(sql.Identifier(db_field), sql.SQL(operator))
+            where_conditions.append(condition)
+            parameters.append(raw_value)
 
-            else:
-                # Basic numeric/string columns (col_num, row_num, etc.)
-                # e.g. operator = '>=', raw_value='7'
-                condition = sql.SQL("{} {} %s").format(sql.Identifier(db_field), sql.SQL(operator))
-                where_conditions.append(condition)
-                parameters.append(raw_value)
+        # 6. Handle tag logic: OR over substring matches using ILIKE
+        if tag_values:
+            patterns = [f"%{v}%" for v in tag_values]  # Substring patterns
+            condition = sql.SQL(
+                "EXISTS (SELECT 1 FROM unnest(tags) t "
+                "WHERE LOWER(t) ILIKE ANY(%s))"  # ILIKE = case-insensitive contains
+            )
+            where_conditions.append(condition)
+            parameters.append(patterns)
 
         # Combine extra WHERE conditions
         if where_conditions:
@@ -296,6 +290,7 @@ def execute_sql(text_to_sql_instance, search_space, table_name="eval_data_valida
         try:
             db.cursor.execute(query_base, parameters)
             results = db.cursor.fetchall()
+            logging.info(f"SQL returned {len(results)} rows")
             return results
         except Exception as e:
             logging.error(f"SQL execution failed: {e}")
