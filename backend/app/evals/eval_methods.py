@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from backend.app.evals.elastic_search.es_client import es_client
 from backend.app.hyse.hypo_schema_search import hyse_search
 from backend.app.actions.infer_action import infer_mentioned_metadata_fields, text_to_sql, execute_sql, TextToSQL, SQLClause
-from eval_utils import generate_embeddings, average_embeddings_with_weights, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db, retrieve_or_generate_schemas, get_cached_metadata_sqlclauses, save_cached_metadata_sqlclauses, llm_rerank_tables
+from eval_utils import generate_embeddings, average_embeddings, average_embeddings_with_weights, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db, retrieve_or_generate_schemas, get_cached_metadata_sqlclauses, save_cached_metadata_sqlclauses, llm_rerank_tables
 
 load_dotenv()
 
@@ -180,27 +180,26 @@ class EvalMethods:
             else:
                 raise ValueError(f"Unknown schema_approach: {schema_approach}")
 
-            # Step 3: Combine embeddings based on the include_query_embedding flag
+            # Step 3: Combine & average embeddings based on the include_query_embedding flag
             combined_list = []
             if query_embedding is not None and include_query_embed:
-                combined_list.append(query_embedding)
-            combined_list.extend(all_schema_embeddings)
-
-            # Step 4: Average the embeddings
-            final_embedding = average_embeddings_with_weights(
-                combined_list,
-                query_weight=query_weight,
-                hypo_weight=hypo_weight
-            )
+                combined_list = [query_embedding] + all_schema_embeddings
+                final_embedding = average_embeddings_with_weights(
+                    combined_list,
+                    query_weight=query_weight,
+                    hypo_weight=hypo_weight
+                )
+            else:
+                final_embedding = average_embeddings(all_schema_embeddings)
 
             if return_embedding:
                 # Just return the HySE embedding, do not perform retrieval
                 return final_embedding
 
-            # Step 5: Perform similarity search between the final averaged embedding and e(existing_scheme_embed)
+            # Step 4: Perform similarity search between the final averaged embedding and e(existing_scheme_embed)
             results = cos_sim_search(final_embedding, search_space=search_space, table_name=self.data_split, column_name=self.embed_col)
             
-            # Step 6: Extract and return only the table names of the top-k results
+            # Step 5: Extract and return only the table names of the top-k results
             top_k_results = [result['table_name'] for result in results[:top_k]]
             return top_k_results
 
