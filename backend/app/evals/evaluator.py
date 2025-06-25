@@ -96,15 +96,16 @@ class Evaluator:
     def evaluate(self):
         # Initialize performance metrics
         methods = [
-            {'name': 'HySE Search (Relational)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'relational'},
+            # {'name': 'HySE Search (Relational)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'relational'},
             {'name': 'HySE Search (Non-Relational)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'non_relational'},
-            {'name': 'HySE Search (Dual_Avg)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'dual_avg'},
-            {'name': 'HySE Dual Seperate Search', 'function': self.eval_methods.single_hyse_dual_separate_search, 'query_type': 'task'},
-            {'name': 'Semantic Task Search', 'function': self.eval_methods.semantic_search, 'query_type': 'task'},
-            {'name': 'Semantic Keyword Search', 'function': self.eval_methods.semantic_search, 'query_type': 'keyword'},
+            # {'name': 'HySE Search (Dual_Avg)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'dual_avg'},
+            # {'name': 'HySE Dual Seperate Search', 'function': self.eval_methods.single_hyse_dual_separate_search, 'query_type': 'task'},
+            # {'name': 'Semantic Task Search', 'function': self.eval_methods.semantic_search, 'query_type': 'task'},
+            # {'name': 'Semantic Keyword Search', 'function': self.eval_methods.semantic_search, 'query_type': 'keyword'},
             # {'name': 'Syntactic Keyword Search', 'function': self.eval_methods.syntactic_search, 'query_type': 'keyword'}
         ]
         recalls = {method['name']: [] for method in methods}
+        retrieval_times = {method['name']: [] for method in methods}
 
         # Iterate over each entry
         for idx, ground_truth_table in tqdm(enumerate(self.ground_truths), total=len(self.ground_truths), desc="Evaluating", unit="entry"):
@@ -121,13 +122,15 @@ class Evaluator:
 
                     for query in queries:
                         try:
+                            retrieval_time = 0
                             if method_name.startswith('HySE Search'):
                                 # Pass `num_embed` parameter, and also pass the approach
                                 schema_approach = method.get('schema_approach', 'relational')
-                                results = search_function(
+                                results, retrieval_time = search_function(
                                     query=query,
                                     num_embed=self.num_embed,
-                                    schema_approach=schema_approach
+                                    schema_approach=schema_approach,
+                                    return_timing=True
                                 )
                             elif method_name == "HySE Dual Seperate Search":
                                 results = search_function(query=query)
@@ -135,6 +138,7 @@ class Evaluator:
                                 results = search_function(query=query, query_type=query_type)
                             recall = self.compute_recall_at_k(results, ground_truth_table)
                             recalls[method_name].append(recall)
+                            retrieval_times[method_name].append(retrieval_time)
 
                             # Retrieve ground truth header & hypothetical schema for HySE search
                             ground_truth_header = ''
@@ -153,6 +157,7 @@ class Evaluator:
                         except Exception as e:
                             logging.exception(f"Error in {method_name} with query '{query}' at index {idx}: {e}")
                             recalls[method_name].append(0)
+                            retrieval_times[method_name].append(0)
                             self.save_failed_query(idx, ground_truth_table, method_name, query_type, query, str(e))
             except Exception as e:
                 logging.exception(f"Error processing row {idx} (table: {ground_truth_table}): {e}")
@@ -163,13 +168,22 @@ class Evaluator:
             method_name: sum(scores) / len(scores) if scores else 0
             for method_name, scores in recalls.items()
         }
+        
+        # Compute average retrieval time for each method
+        avg_retrieval_times = {
+            method_name: sum(times) / len(times) if times else 0
+            for method_name, times in retrieval_times.items()
+        }
 
         # Report the results
         for method_name, avg_recall in avg_recalls.items():
+            avg_time = avg_retrieval_times.get(method_name, 0)
             logging.info(f"Average Recall @{self.k} for {method_name}: {avg_recall}")
+            if avg_time > 0:
+                logging.info(f"Average Retrieval Time for {method_name} (N={self.num_embed}): {avg_time:.4f} seconds")
 
         # Return the results
-        return avg_recalls
+        return avg_recalls, avg_retrieval_times
     
     # Evaluate retrieval recall across different weight combinations for HySE
     def evaluate_with_weights(self, weight_step=0.1):
@@ -358,7 +372,7 @@ class Evaluator:
                     )
                     baseline_sizes.append(len(baseline_result))
 
-                    # Refined: Cncatenate all metadata fields
+                    # Refined: Concatenate all metadata fields
                     refined_query = ". ".join(sublist)
                     refined_result = self.eval_methods.metadata_search(
                         metadata_query=refined_query,
@@ -435,19 +449,26 @@ class Evaluator:
 
 
 if __name__ == "__main__":
+    # Force logging config
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
     evaluator = Evaluator(
         data_split="eval_data_validation",
         # embed_col="example_rows_embed",
         embed_col="table_header_embed",
         k=10,
         limit=300,
-        num_embed=1
+        num_embed=2
     )
 
-    # results = evaluator.evaluate()
-    # print("Evaluation Results:")
-    # for method, recall in results.items():
-    #     print(f"{method}: {recall}")
+    avg_recalls, avg_retrieval_times = evaluator.evaluate()
+    print("Evaluation Results:")
+    for method in avg_recalls:
+        recall = avg_recalls[method]
+        avg_time = avg_retrieval_times.get(method, 0)
+        print(f"{method}: Recall@{evaluator.k} = {recall:.4f}, Avg Time = {avg_time:.4f}s")
     
     # weight_evaluation_results = evaluator.evaluate_with_weights(weight_step=0.1)
     # for weight_combo, avg_recall in weight_evaluation_results.items():
@@ -456,10 +477,10 @@ if __name__ == "__main__":
     # Evaluate using Multi-Stage Retrieval
     # multi_stage_recall = evaluator.evaluate_multi_stage_retriever(
     #                             stage1_method = "hyse",
-    #                             stage2_mode = "concat",
+    #                             stage2_mode = "first",
     #                             num_top_tables=50
     #                         )
     # print(f"Multi-Stage Retrieval: Average Recall = {multi_stage_recall}")
 
     # Evaluate metadata refinement
-    metadata_refine = evaluator.evaluate_metadata_refinement()
+    # metadata_refine = evaluator.evaluate_metadata_refinement()

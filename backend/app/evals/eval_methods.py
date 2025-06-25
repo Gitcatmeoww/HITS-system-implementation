@@ -1,9 +1,10 @@
 from backend.app.table_representation.openai_client import OpenAIClient
 from backend.app.hyse.hypo_schema_search import cos_sim_search
+import time
 import logging
 from copy import deepcopy
 from dotenv import load_dotenv
-from backend.app.evals.elastic_search.es_client import es_client
+# from backend.app.evals.elastic_search.es_client import es_client
 from backend.app.hyse.hypo_schema_search import hyse_search
 from backend.app.actions.infer_action import infer_mentioned_metadata_fields, text_to_sql, execute_sql, TextToSQL, SQLClause
 from eval_utils import generate_embeddings, average_embeddings, average_embeddings_with_weights, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db, retrieve_or_generate_schemas, get_cached_metadata_sqlclauses, save_cached_metadata_sqlclauses, llm_rerank_tables
@@ -18,7 +19,7 @@ openai_client = OpenAIClient()
 class EvalMethods:
     def __init__(self, data_split, embed_col, k):
         self.openai_client = openai_client
-        self.es_client = es_client.client
+        # self.es_client = es_client.client
         self.data_split = data_split
         self.embed_col = embed_col
         self.k = k
@@ -125,7 +126,10 @@ class EvalMethods:
         search_space=None,
         top_k=None,
         schema_approach="relational",
+        return_timing=False,
     ):
+        start_time = time.time()
+        
         try:
             if top_k is None:
                 top_k = self.k
@@ -194,6 +198,10 @@ class EvalMethods:
 
             if return_embedding:
                 # Just return the HySE embedding, do not perform retrieval
+                end_time = time.time()
+                retrieval_time = end_time - start_time
+                if return_timing:
+                    return final_embedding, retrieval_time
                 return final_embedding
 
             # Step 4: Perform similarity search between the final averaged embedding and e(existing_scheme_embed)
@@ -201,10 +209,18 @@ class EvalMethods:
             
             # Step 5: Extract and return only the table names of the top-k results
             top_k_results = [result['table_name'] for result in results[:top_k]]
+            
+            end_time = time.time()
+            retrieval_time = end_time - start_time
+            
+            if return_timing:
+                return top_k_results, retrieval_time
             return top_k_results
 
         except Exception as e:
             logging.exception(f"Error during single_hyse_search: {e}")
+            if return_timing:
+                return [], 0
             return []
 
     def single_hyse_dual_separate_search(
@@ -231,7 +247,7 @@ class EvalMethods:
             return_embedding=False,
             search_space=search_space,
             top_k=top_k,
-            schema_approach="relational"
+            schema_approach="non_relational"
         )
 
         # Step 2: Perform single HySE search w/ NON-RELATIONAL template
