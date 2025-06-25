@@ -58,7 +58,7 @@ class EvalData:
         # self.csv_files_path = 'eval/eval_data_processed'
 
         self.csv_table_mapping = {
-            'val_data_with_header_embed.csv': 'eval_data_validation'
+            'merged_eval_data_validation.csv': 'eval_data_validation'
         }
         self.csv_files_path = 'eval/eval_data_processed_exp'
     
@@ -125,6 +125,7 @@ class EvalData:
             table_name TEXT,
             database_name TEXT,
             table_header TEXT,
+            example_rows_md TEXT,
             time_granu TEXT,
             geo_granu TEXT,
             db_description TEXT,
@@ -137,17 +138,24 @@ class EvalData:
             keywords TEXT[],
             task_queries TEXT[],
             metadata_queries JSONB,
-            table_header_embed VECTOR(1536)
+            table_header_embed VECTOR(1536),
+            example_rows_embed VECTOR(1536)
         );
         '''
         db.cursor.execute(create_table_query)
 
-        # Create index on the embedding column for efficient similarity search
-        index_query = f'''
+        # Create index on the embedding columns for efficient similarity search
+        index_query_table_header_embed = f'''
         CREATE INDEX IF NOT EXISTS {table_name}_table_header_embed_idx
         ON {table_name} USING hnsw (table_header_embed vector_cosine_ops) WITH (m = 16, ef_construction = 64);
         '''
-        db.cursor.execute(index_query)
+        db.cursor.execute(index_query_table_header_embed)
+
+        index_query_example_rows_embed = f'''
+        CREATE INDEX IF NOT EXISTS {table_name}_example_rows_embed_idx
+        ON {table_name} USING hnsw (example_rows_embed vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+        '''
+        db.cursor.execute(index_query_example_rows_embed)
     
     def insert_eval_data(self):
         with DatabaseConnection() as db:
@@ -273,6 +281,7 @@ class EvalData:
                     table_name,
                     database_name,
                     table_header,
+                    example_rows_md,
                     time_granu,
                     geo_granu,
                     db_description,
@@ -285,20 +294,21 @@ class EvalData:
                     keywords,
                     task_queries,
                     metadata_queries,
-                    table_header_embed
+                    table_header_embed,
+                    example_rows_embed
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
                 '''
 
                 # Iterate over rows in the DataFrame
                 data_to_insert = []
                 for index, row in df.iterrows():
                     try:
-                        # Map CSV columns to table columns
                         data_to_insert.append((
                             row['table_name'],
                             row['database_name'],
                             row['table_header'],
+                            row['example_rows_md'],
                             row['time_granu'],
                             row['geo_granu'],
                             row['db_description'],
@@ -311,7 +321,8 @@ class EvalData:
                             parse_list_column(row['keywords']),
                             parse_list_column(row['task_queries']),
                             Json(parse_json_column(row['metadata_queries'])),
-                            parse_vector_column(row['table_header_embed'])
+                            parse_vector_column(row['table_header_embed']),
+                            parse_vector_column(row['example_rows_embed'])
                         ))
                     except Exception as e:
                         print(f"Error processing row {index} in file {csv_file_path}: {e}")
@@ -459,12 +470,12 @@ def main():
         # Insert evaluation data
         eval_data = EvalData(openai_client)
         # eval_data.insert_eval_data()
-        # eval_data.insert_preprocessed_eval_data()
+        eval_data.insert_preprocessed_eval_data()
         # eval_data.initialize_eval_hyse_schemas_table()
         # eval_data.initialize_eval_hyse_schemas_non_relational_table()
         # eval_data.initialize_eval_query_embeds_table()
         # eval_data.initialize_eval_keyword_embeds_table()
-        eval_data.initialize_eval_metadata_sqlclauses_table()
+        # eval_data.initialize_eval_metadata_sqlclauses_table()
     except Exception as e:
         print(f"An error occurred: {e}")
         raise
