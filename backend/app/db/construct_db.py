@@ -58,9 +58,9 @@ class EvalData:
         # self.csv_files_path = 'eval/eval_data_processed'
 
         self.csv_table_mapping = {
-            'merged_eval_data_validation.csv': 'eval_data_validation'
+            'eval_data_validation.csv': 'eval_data_validation'
         }
-        self.csv_files_path = 'eval/eval_data_processed_exp'
+        self.csv_files_path = 'eval/eval_data_processed_exp_opt'
     
     def truncate_example_rows_md(self, text, max_tokens, num_rows=3):
         lines = text.strip().split('\n')
@@ -471,11 +471,11 @@ def main():
         eval_data = EvalData(openai_client)
         # eval_data.insert_eval_data()
         eval_data.insert_preprocessed_eval_data()
-        # eval_data.initialize_eval_hyse_schemas_table()
-        # eval_data.initialize_eval_hyse_schemas_non_relational_table()
-        # eval_data.initialize_eval_query_embeds_table()
-        # eval_data.initialize_eval_keyword_embeds_table()
-        # eval_data.initialize_eval_metadata_sqlclauses_table()
+        eval_data.initialize_eval_hyse_schemas_table()
+        eval_data.initialize_eval_hyse_schemas_non_relational_table()
+        eval_data.initialize_eval_query_embeds_table()
+        eval_data.initialize_eval_keyword_embeds_table()
+        eval_data.initialize_eval_metadata_sqlclauses_table()
     except Exception as e:
         print(f"An error occurred: {e}")
         raise

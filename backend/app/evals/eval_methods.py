@@ -93,8 +93,8 @@ class EvalMethods:
                             },
                             {
                                 "match": {
-                                    # "example_rows_md": {
-                                    "table_header": {
+                                    "example_rows_md": {
+                                    # "table_header": {
                                         "query": query,
                                         "fuzziness": "AUTO"
                                     }

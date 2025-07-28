@@ -96,11 +96,11 @@ class Evaluator:
     def evaluate(self):
         # Initialize performance metrics
         methods = [
-            # {'name': 'HySE Search (Relational)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'relational'},
+            {'name': 'HySE Search (Relational)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'relational'},
             {'name': 'HySE Search (Non-Relational)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'non_relational'},
-            # {'name': 'HySE Search (Dual_Avg)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'dual_avg'},
+            {'name': 'HySE Search (Dual_Avg)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'dual_avg'},
             # {'name': 'HySE Dual Seperate Search', 'function': self.eval_methods.single_hyse_dual_separate_search, 'query_type': 'task'},
-            # {'name': 'Semantic Task Search', 'function': self.eval_methods.semantic_search, 'query_type': 'task'},
+            {'name': 'Semantic Task Search', 'function': self.eval_methods.semantic_search, 'query_type': 'task'},
             # {'name': 'Semantic Keyword Search', 'function': self.eval_methods.semantic_search, 'query_type': 'keyword'},
             # {'name': 'Syntactic Keyword Search', 'function': self.eval_methods.syntactic_search, 'query_type': 'keyword'}
         ]
@@ -404,7 +404,7 @@ class Evaluator:
     def _run_stage1_retrieval(self, stage1_method, query, num_top_tables):
         if stage1_method.lower().startswith("hyse"):
             # e.g. 'HySE Search'
-            results = self.eval_methods.single_hyse_search(query=query, num_embed=self.num_embed, top_k=num_top_tables)
+            results = self.eval_methods.single_hyse_search(query=query, num_embed=self.num_embed, top_k=num_top_tables, schema_approach="non_relational")
         elif stage1_method.lower().startswith("semantic"):
             # e.g. 'Semantic Task Search'
             results = self.eval_methods.semantic_search(query=query, query_type="task", top_k=num_top_tables)
@@ -477,7 +477,7 @@ if __name__ == "__main__":
     # Evaluate using Multi-Stage Retrieval
     # multi_stage_recall = evaluator.evaluate_multi_stage_retriever(
     #                             stage1_method = "hyse",
-    #                             stage2_mode = "first",
+    #                             stage2_mode = "concat",
     #                             num_top_tables=50
     #                         )
     # print(f"Multi-Stage Retrieval: Average Recall = {multi_stage_recall}")
