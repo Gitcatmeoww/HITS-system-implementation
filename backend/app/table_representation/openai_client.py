@@ -19,7 +19,7 @@ class OpenAIClient:
         self.text_generation_model_default = "gpt-4o-mini"
         self.embedding_model_default = "text-embedding-3-small"
 
-    def infer_metadata(self, messages, response_model, model=None):
+    def infer_metadata(self, messages, response_model, model=None, temperature=0.1):
         if model is None:
             model = self.text_generation_model_default
         try:
@@ -27,7 +27,8 @@ class OpenAIClient:
             response = client.chat.completions.create(
                 model=model,
                 response_model=response_model,
-                messages=messages
+                messages=messages,
+                temperature=temperature
             )
             return response
         except Exception as e:

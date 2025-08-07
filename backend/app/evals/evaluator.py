@@ -96,10 +96,12 @@ class Evaluator:
     def evaluate(self):
         # Initialize performance metrics
         methods = [
-            {'name': 'HySE Search (Relational)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'relational'},
-            {'name': 'HySE Search (Non-Relational)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'non_relational'},
-            {'name': 'HySE Search (Dual_Avg)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'dual_avg'},
+            # {'name': 'HySE Search (Relational)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'relational'},
+            # {'name': 'HySE Search (Non-Relational)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'non_relational'},
+            # {'name': 'HySE Search (Dual_Avg)', 'function': self.eval_methods.single_hyse_search, 'query_type': 'task', 'schema_approach': 'dual_avg'},
             # {'name': 'HySE Dual Seperate Search', 'function': self.eval_methods.single_hyse_dual_separate_search, 'query_type': 'task'},
+            {'name': 'Multi-Component HySE (Relational)', 'function': self.eval_methods.multi_component_hyse_search, 'query_type': 'task', 'schema_approach': 'relational'},
+            {'name': 'Multi-Component HySE (Non-Relational)', 'function': self.eval_methods.multi_component_hyse_search, 'query_type': 'task', 'schema_approach': 'non_relational'},
             {'name': 'Semantic Task Search', 'function': self.eval_methods.semantic_search, 'query_type': 'task'},
             # {'name': 'Semantic Keyword Search', 'function': self.eval_methods.semantic_search, 'query_type': 'keyword'},
             # {'name': 'Syntactic Keyword Search', 'function': self.eval_methods.syntactic_search, 'query_type': 'keyword'}
@@ -123,7 +125,7 @@ class Evaluator:
                     for query in queries:
                         try:
                             retrieval_time = 0
-                            if method_name.startswith('HySE Search'):
+                            if method_name.startswith('HySE Search') or method_name.startswith('Multi-Component HySE'):
                                 # Pass `num_embed` parameter, and also pass the approach
                                 schema_approach = method.get('schema_approach', 'relational')
                                 results, retrieval_time = search_function(
@@ -456,11 +458,10 @@ if __name__ == "__main__":
 
     evaluator = Evaluator(
         data_split="eval_data_validation",
-        # embed_col="example_rows_embed",
-        embed_col="table_header_embed",
+        embed_col="example_3rows_table_name_embed",
         k=10,
-        limit=300,
-        num_embed=2
+        # limit=300,
+        num_embed=1
     )
 
     avg_recalls, avg_retrieval_times = evaluator.evaluate()

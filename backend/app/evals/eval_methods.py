@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 # from backend.app.evals.elastic_search.es_client import es_client
 from backend.app.hyse.hypo_schema_search import hyse_search
 from backend.app.actions.infer_action import infer_mentioned_metadata_fields, text_to_sql, execute_sql, TextToSQL, SQLClause
-from eval_utils import generate_embeddings, average_embeddings, average_embeddings_with_weights, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db, retrieve_or_generate_schemas, get_cached_metadata_sqlclauses, save_cached_metadata_sqlclauses, llm_rerank_tables
+from eval_utils import generate_embeddings, average_embeddings, average_embeddings_with_weights, get_query_embedding_from_db, get_keyword_embedding_from_db, save_query_embedding_to_db, save_keyword_embedding_to_db, retrieve_or_generate_schemas, get_cached_metadata_sqlclauses, save_cached_metadata_sqlclauses, llm_rerank_tables, retrieve_or_generate_hyse_components
 
 load_dotenv()
 
@@ -277,6 +277,129 @@ class EvalMethods:
             return llm_rerank_tables(query, final_results, top_k)
         else:
             return final_results[:top_k]
+
+    def multi_component_hyse_search(
+        self,
+        query,
+        num_embed=1,
+        include_query_embed=True,
+        query_weight=0.5,
+        hypo_weight=0.5,
+        return_embedding=False,
+        search_space=None,
+        top_k=None,
+        schema_approach="relational",
+        return_timing=False,
+    ):
+        """
+        Multi-component HySE search that matches HySE embedding type with corpus embedding type
+        based on embed_col configuration
+        """
+        start_time = time.time()
+        
+        try:
+            if top_k is None:
+                top_k = self.k
+
+            # Step 1: Map corpus embed_col to corresponding HySE component embedding type
+            # The mapping handles cases where corpus has different naming conventions
+            embed_col_mapping = {
+                'table_header_embed': 'table_header_embed',
+                'table_header_name_embed': 'table_header_name_embed',
+                'example_rows_embed': 'example_2rows_embed',  # Map general 'example_rows' to 2-row version
+                'example_2rows_embed': 'example_2rows_embed',
+                'example_3rows_embed': 'example_3rows_embed',
+                'example_2rows_table_name_embed': 'example_2rows_table_name_embed',
+                'example_3rows_table_name_embed': 'example_3rows_table_name_embed'
+            }
+            
+            hyse_embed_type = embed_col_mapping.get(self.embed_col)
+            if not hyse_embed_type:
+                raise ValueError(f"Unsupported embed_col: {self.embed_col}")
+            
+            logging.info(f"[MultiHySE] Query: '{query}' | Schema: {schema_approach} | Corpus embed_col: {self.embed_col} | HySE embed_type: {hyse_embed_type}")
+
+            # Step 2: Retrieve cached query embedding if needed
+            query_embedding = None
+            if include_query_embed:
+                query_embedding = get_query_embedding_from_db(query)
+                if query_embedding is None:
+                    # Generate & cache query embedding if not already cached
+                    logging.info(f"[MultiHySE] Generating new query embedding for: '{query}'")
+                    query_embedding = generate_embeddings([query])[0]
+                    save_query_embedding_to_db(query, query_embedding)
+                else:
+                    logging.info(f"[MultiHySE] Using cached query embedding for: '{query}'")
+
+            # Step 3: Retrieve or generate HySE components
+            logging.info(f"[MultiHySE] Retrieving/generating {num_embed} HySE components for schema_approach: {schema_approach}")
+            hyse_components = retrieve_or_generate_hyse_components(
+                query=query,
+                num_embed=num_embed,
+                schema_approach=schema_approach
+            )
+            logging.info(f"[MultiHySE] Retrieved {len(hyse_components)} HySE components")
+
+            # Step 4: Extract embeddings of the specified type
+            hyse_embeddings = []
+            for i, component in enumerate(hyse_components):
+                if hyse_embed_type in component['embeddings']:
+                    hyse_embeddings.append(component['embeddings'][hyse_embed_type])
+                    logging.debug(f"[MultiHySE] Component {i}: Found {hyse_embed_type} embedding")
+                else:
+                    logging.warning(f"[MultiHySE] Component {i}: Missing {hyse_embed_type} embedding")
+
+            if not hyse_embeddings:
+                logging.error(f"[MultiHySE] No HySE embeddings found for type: {hyse_embed_type}")
+                if return_timing:
+                    return [], 0
+                return []
+
+            logging.info(f"[MultiHySE] Collected {len(hyse_embeddings)} embeddings of type: {hyse_embed_type}")
+
+            # Step 5: Combine & average embeddings based on the include_query_embedding flag
+            combined_list = []
+            if query_embedding is not None and include_query_embed:
+                combined_list = [query_embedding] + hyse_embeddings
+                logging.info(f"[MultiHySE] Combining query + HySE embeddings with weights (query: {query_weight}, hypo: {hypo_weight})")
+                final_embedding = average_embeddings_with_weights(
+                    combined_list,
+                    query_weight=query_weight,
+                    hypo_weight=hypo_weight
+                )
+            else:
+                logging.info(f"[MultiHySE] Averaging {len(hyse_embeddings)} HySE embeddings only")
+                final_embedding = average_embeddings(hyse_embeddings)
+
+            if return_embedding:
+                # Just return the HySE embedding, do not perform retrieval
+                end_time = time.time()
+                retrieval_time = end_time - start_time
+                if return_timing:
+                    return final_embedding, retrieval_time
+                return final_embedding
+
+            # Step 6: Perform similarity search using the corpus embed_col
+            logging.info(f"[MultiHySE] Performing similarity search against corpus column: {self.embed_col}")
+            results = cos_sim_search(final_embedding, search_space=search_space, table_name=self.data_split, column_name=self.embed_col)
+            
+            # Step 7: Extract and return only the table names of the top-k results
+            top_k_results = [result['table_name'] for result in results[:top_k]]
+            
+            end_time = time.time()
+            retrieval_time = end_time - start_time
+            
+            logging.info(f"[MultiHySE] Retrieved {len(top_k_results)} results in {retrieval_time:.4f}s | Top 3: {top_k_results[:3]}")
+            
+            if return_timing:
+                return top_k_results, retrieval_time
+            return top_k_results
+
+        except Exception as e:
+            logging.exception(f"Error during multi_component_hyse_search: {e}")
+            if return_timing:
+                return [], 0
+            return []
 
     # TODO: Multi-hyse implementation
     def multi_hyse_search(self, query):

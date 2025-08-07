@@ -56,10 +56,137 @@ What data is needed to train a machine learning model to forecast demand for med
 
 Output:
 {{
-    "table_name": "Sales",
+    "table_name": "Medicine_Sales",
     "column_names": ["medicine_name", "supplier_name", "quantity_sold", "sale_date", "price", "region"]
 }}
 """
+
+PROMPT_SCHEMA_WITH_EXAMPLES_RELATIONAL = """
+Given the task: "{query}"
+
+Generate a **relational database schema** specifically designed for this task. Think carefully about what data would be needed to accomplish this specific goal.
+
+Requirements:
+1. Create ONE table that directly supports the given task
+2. Use normalized relational design principles (separate entities, use IDs for relationships)
+3. Column names should reflect the specific domain and requirements of the task
+4. Table name should be descriptive and task-relevant
+5. Provide realistic example data that matches the task context
+
+Generate a JSON with this exact structure:
+{{
+    "table_name": "your_task_specific_table_name",
+    "column_names": ["col1", "col2", "col3", ...],
+    "example_2rows": [
+        [val1, val2, val3, ...],
+        [val1, val2, val3, ...]
+    ],
+    "example_3rows": [
+        [val1, val2, val3, ...],
+        [val1, val2, val3, ...],
+        [val1, val2, val3, ...]
+    ]
+}}
+
+Focus on the specific requirements of "{query}" - what entities, attributes, and relationships would be needed?
+"""
+
+PROMPT_SCHEMA_WITH_EXAMPLES_NON_RELATIONAL = """
+Given the task: "{query}"
+
+Generate a **non-relational database schema** specifically designed for this task. Think carefully about what data would be needed to accomplish this specific goal.
+
+Requirements:
+1. Create ONE denormalized table that captures all necessary information for the task
+2. Use descriptive, human-readable column names (avoid IDs, prefer natural keys)
+3. Include all relevant attributes directly in the table (no foreign key relationships)
+4. Column names should reflect the specific domain and requirements of the task
+5. Table name should be descriptive and task-relevant
+6. Provide realistic example data that matches the task context
+
+Generate a JSON with this exact structure:
+{{
+    "table_name": "your_task_specific_table_name",
+    "column_names": ["descriptive_col1", "descriptive_col2", "descriptive_col3", ...],
+    "example_2rows": [
+        [val1, val2, val3, ...],
+        [val1, val2, val3, ...]
+    ],
+    "example_3rows": [
+        [val1, val2, val3, ...],
+        [val1, val2, val3, ...],
+        [val1, val2, val3, ...]
+    ]
+}}
+
+Focus on the specific requirements of "{query}" - what information would be needed in a single, comprehensive table?
+"""
+
+def get_diverse_schema_examples():
+    """
+    Generate diverse schema examples to reduce overfitting to any specific domain
+    """
+    import random
+    
+    examples = [
+        {
+            "domain": "Education",
+            "relational": {
+                "table_name": "student_grades",
+                "columns": ["student_id", "course_id", "grade", "semester", "credits"]
+            },
+            "non_relational": {
+                "table_name": "student_performance", 
+                "columns": ["student_name", "course_name", "grade", "semester", "instructor", "credits"]
+            }
+        },
+        {
+            "domain": "Transportation",
+            "relational": {
+                "table_name": "vehicle_trips",
+                "columns": ["trip_id", "vehicle_id", "start_location", "end_location", "duration", "distance"]
+            },
+            "non_relational": {
+                "table_name": "transportation_logs",
+                "columns": ["vehicle_type", "route", "start_time", "end_time", "passenger_count", "weather"]
+            }
+        },
+        {
+            "domain": "Environmental",
+            "relational": {
+                "table_name": "weather_measurements",
+                "columns": ["measurement_id", "station_id", "temperature", "humidity", "timestamp"]
+            },
+            "non_relational": {
+                "table_name": "climate_data",
+                "columns": ["location", "temperature", "humidity", "wind_speed", "date", "season"]
+            }
+        },
+        {
+            "domain": "Finance",
+            "relational": {
+                "table_name": "account_transactions", 
+                "columns": ["transaction_id", "account_id", "amount", "transaction_type", "timestamp"]
+            },
+            "non_relational": {
+                "table_name": "financial_records",
+                "columns": ["account_holder", "transaction_amount", "category", "description", "date", "balance"]
+            }
+        },
+        {
+            "domain": "Social Media",
+            "relational": {
+                "table_name": "user_posts",
+                "columns": ["post_id", "user_id", "content", "likes", "timestamp"]
+            },
+            "non_relational": {
+                "table_name": "social_activity",
+                "columns": ["username", "post_content", "likes", "shares", "hashtags", "platform"]
+            }
+        }
+    ]
+    
+    return random.choice(examples)
 
 PROMPT_MULTI_SCHEMA = """
 Given the task of {query}, generate a database schema of at least 1, and at most {num_left} normalized table headers that are needed to implement the task.
@@ -96,6 +223,34 @@ Output:
 class TableSchema(BaseModel):
     table_name: str
     column_names: List[str]
+
+class TableSchemaWithExamples(BaseModel):
+    table_name: str
+    column_names: List[str]
+    example_2rows: List[List[Any]]  # First 2 data rows (excluding header)
+    example_3rows: List[List[Any]]  # First 3 data rows (excluding header)
+    
+    def get_table_header(self) -> str:
+        """Get formatted table header as string"""
+        return " | ".join(self.column_names)
+    
+    def get_example_2rows_markdown(self) -> str:
+        """Get header + 2 example rows formatted as markdown table"""
+        header = " | ".join(self.column_names)
+        separator = " | ".join(["---"] * len(self.column_names))
+        rows = []
+        for row in self.example_2rows[:2]:  # Ensure max 2 rows
+            rows.append(" | ".join(str(cell) for cell in row))
+        return "\n".join([header, separator] + rows)
+    
+    def get_example_3rows_markdown(self) -> str:
+        """Get header + 3 example rows formatted as markdown table"""
+        header = " | ".join(self.column_names)
+        separator = " | ".join(["---"] * len(self.column_names))
+        rows = []
+        for row in self.example_3rows[:3]:  # Ensure max 3 rows
+            rows.append(" | ".join(str(cell) for cell in row))
+        return "\n".join([header, separator] + rows)
 
 def hyse_search(initial_query, search_space=None, num_schema=1, k=10, table_name="corpus_raw_metadata_with_embedding", column_name="comb_embed"):
     # Step 0: Initialize the results list and num_left
@@ -145,6 +300,57 @@ def hyse_search(initial_query, search_space=None, num_schema=1, k=10, table_name
     top_k_results = aggregated_results[:k]
 
     return top_k_results, single_hypo_schema_json, single_hypo_schema_embedding
+
+def infer_single_hypothetical_schema_with_examples(initial_query, schema_approach="relational"):
+    """
+    Generate a single hypothetical schema with example data using structured output
+    """
+    try:
+        # Get a diverse example to inspire different designs
+        diverse_example = get_diverse_schema_examples()
+        example_schema = diverse_example["relational"] if schema_approach == "relational" else diverse_example["non_relational"]
+        
+        # Pick the template based on schema_approach
+        if schema_approach == "relational":
+            prompt_template = PROMPT_SCHEMA_WITH_EXAMPLES_RELATIONAL
+        else:
+            prompt_template = PROMPT_SCHEMA_WITH_EXAMPLES_NON_RELATIONAL
+
+        # Format the prompt
+        formatted_prompt = format_prompt(prompt_template, query=initial_query)
+        
+        response_model = TableSchemaWithExamples
+        
+        # Enhanced system prompt with dynamic example for inspiration
+        system_prompt = f"""
+            You are an expert database designer. For each task, you must:
+
+            1. CAREFULLY analyze the specific task requirements
+            2. Design a schema that directly supports THAT SPECIFIC TASK (not generic examples)
+            3. Use column names and table names that reflect the ACTUAL DOMAIN of the task
+            4. Generate realistic example data that matches the task context
+            5. Avoid generic or repetitive schemas - be creative and domain-specific
+            6. Think creatively about what data structures would best support the given objective
+
+            For inspiration (but do NOT copy), here's an example from the {diverse_example["domain"]} domain:
+            Table: {example_schema["table_name"]}
+            Columns: {example_schema["columns"]}
+
+            Your schema should be completely different and tailored to the specific task provided.
+            Be diverse and task-specific in your designs. Different tasks should produce different schemas.
+        """
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": formatted_prompt}
+        ]
+        
+        # Add some randomness to encourage diversity (temperature)
+        result = openai_client.infer_metadata(messages, response_model, temperature=0.8)
+        return result
+    except Exception as e:
+        logging.exception(f"Error inferring single hypothetical schema with examples: {e}")
+        return None
 
 def infer_single_hypothetical_schema(initial_query, prompt_template):
     prompt = format_prompt(prompt_template=prompt_template, query=initial_query)

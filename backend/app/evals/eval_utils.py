@@ -1,6 +1,6 @@
 import logging
 from backend.app.db.connect_db import DatabaseConnection
-from backend.app.hyse.hypo_schema_search import infer_single_hypothetical_schema, PROMPT_SINGLE_SCHEMA_RELATIONAL, PROMPT_SINGLE_SCHEMA_NON_RELATIONAL
+from backend.app.hyse.hypo_schema_search import infer_single_hypothetical_schema, infer_single_hypothetical_schema_with_examples, PROMPT_SINGLE_SCHEMA_RELATIONAL, PROMPT_SCHEMA_WITH_EXAMPLES_RELATIONAL, PROMPT_SINGLE_SCHEMA_NON_RELATIONAL, PROMPT_SCHEMA_WITH_EXAMPLES_NON_RELATIONAL
 from backend.app.table_representation.openai_client import OpenAIClient
 from pydantic import BaseModel
 from typing import List
@@ -361,3 +361,239 @@ def llm_rerank_tables(user_query, candidate_tables, k):
     except Exception as e:
         logging.error(f"LLM re‑ranker failed – falling back to original order. Error: {e}")
         return candidate_tables[:k]
+
+def get_hyse_components_from_db(query, num_embed, schema_approach="relational"):
+    """Retrieve HySE components and their embeddings from the database"""
+    try:
+        with DatabaseConnection() as db:
+            select_query = """
+            SELECT table_name_comp, table_header_comp, example_2rows_comp, example_3rows_comp,
+                   table_header_embed, table_header_name_embed, 
+                   example_2rows_embed, example_2rows_table_name_embed,
+                   example_3rows_embed, example_3rows_table_name_embed
+            FROM eval_hyse_components
+            WHERE query = %s AND schema_approach = %s
+            ORDER BY hypo_schema_id ASC
+            LIMIT %s;
+            """
+            db.cursor.execute(select_query, (query, schema_approach, num_embed))
+            results = db.cursor.fetchall()
+
+            components = []
+            for result in results:
+                component = {
+                    'table_name_comp': result['table_name_comp'],
+                    'table_header_comp': result['table_header_comp'],
+                    'example_2rows_comp': result['example_2rows_comp'],
+                    'example_3rows_comp': result['example_3rows_comp'],
+                    'embeddings': {}
+                }
+                
+                # Process all embedding columns
+                for embed_col in ['table_header_embed', 'table_header_name_embed', 
+                                'example_2rows_embed', 'example_2rows_table_name_embed',
+                                'example_3rows_embed', 'example_3rows_table_name_embed']:
+                    embed_data = result[embed_col]
+                    if isinstance(embed_data, str):
+                        embedding_list = json.loads(embed_data)
+                    elif isinstance(embed_data, list):
+                        embedding_list = embed_data
+                    else:
+                        embedding_list = embed_data
+                    
+                    component['embeddings'][embed_col] = np.array(embedding_list, dtype=float)
+                
+                components.append(component)           
+            return components
+    except Exception as e:
+        logging.exception(f"Error retrieving HySE components from DB: {e}")
+        return []
+
+def generate_hyse_components(query, schema_approach="relational"):
+    """Generate all HySE components (table name, header, 2-row and 3-row examples) in one go using structured output"""
+    try:
+        logging.info(f"[HySE-Gen] Generating {schema_approach} schema for query: '{query}'")
+        
+        # Generate a single complete hypothetical schema with examples
+        schema_result = infer_single_hypothetical_schema_with_examples(
+            initial_query=query, 
+            schema_approach=schema_approach
+        )
+        
+        if not schema_result:
+            logging.error(f"[HySE-Gen] Failed to generate schema for query: {query}")
+            return None
+        
+        logging.info(f"[HySE-Gen] Generated schema with table_name: '{schema_result.table_name}', columns: {len(schema_result.column_names)}")
+        logging.info(f"[HySE-Gen] Column names: {schema_result.column_names}")
+        
+        # Extract components using structured output
+        components = {
+            'table_name_comp': schema_result.table_name,
+            'table_header_comp': schema_result.get_table_header(),
+            'example_2rows_comp': schema_result.get_example_2rows_markdown(),
+            'example_3rows_comp': schema_result.get_example_3rows_markdown()
+        }
+        
+        logging.info(f"[HySE-Gen] Components generated:")
+        logging.info(f"  Table name: {components['table_name_comp']}")
+        logging.info(f"  Header: {components['table_header_comp']}")
+        
+        # Show first few characters of examples to verify diversity without cluttering logs
+        example_preview = components['example_2rows_comp'].replace('\n', ' | ')[:150]
+        logging.info(f"  Example preview: {example_preview}...")
+        
+        return components
+    except Exception as e:
+        logging.exception(f"[HySE-Gen] Error generating HySE components for query '{query}': {e}")
+        return None
+
+def generate_component_embeddings(components):
+    """Generate embeddings for all HySE components"""
+    try:
+        logging.info(f"[HySE-Embed] Generating embeddings for all 6 component types")
+        embeddings = {}
+        
+        # Generate embeddings for each component and its variations
+        table_header_text = components['table_header_comp']
+        table_name_text = components['table_name_comp']
+        example_2rows_text = components['example_2rows_comp']  
+        example_3rows_text = components['example_3rows_comp']
+        
+        logging.info(f"[HySE-Embed] Table name: '{table_name_text}'")
+        logging.debug(f"[HySE-Embed] Header text length: {len(table_header_text)} chars")
+        logging.debug(f"[HySE-Embed] 2-rows text length: {len(example_2rows_text)} chars")
+        logging.debug(f"[HySE-Embed] 3-rows text length: {len(example_3rows_text)} chars")
+        
+        # Generate base embeddings
+        logging.info(f"[HySE-Embed] Generating base embeddings...")
+        embeddings['table_header_embed'] = openai_client.generate_embeddings(table_header_text)
+        embeddings['example_2rows_embed'] = openai_client.generate_embeddings(example_2rows_text)
+        embeddings['example_3rows_embed'] = openai_client.generate_embeddings(example_3rows_text)
+        
+        # Generate embeddings with table name included
+        logging.info(f"[HySE-Embed] Generating table name + content embeddings...")
+        embeddings['table_header_name_embed'] = openai_client.generate_embeddings(f"{table_name_text} {table_header_text}")
+        embeddings['example_2rows_table_name_embed'] = openai_client.generate_embeddings(f"{table_name_text} {example_2rows_text}")
+        embeddings['example_3rows_table_name_embed'] = openai_client.generate_embeddings(f"{table_name_text} {example_3rows_text}")
+        
+        # Convert to numpy arrays
+        for key in embeddings:
+            if not isinstance(embeddings[key], np.ndarray):
+                embeddings[key] = np.array(embeddings[key], dtype=float)
+        
+        logging.info(f"[HySE-Embed] Successfully generated all 6 embedding types: {list(embeddings.keys())}")
+        return embeddings
+    except Exception as e:
+        logging.exception(f"[HySE-Embed] Error generating component embeddings: {e}")
+        return {}
+
+def save_hyse_components_to_db(query, components, embeddings, schema_approach="relational"):
+    """Save HySE components and their embeddings to the database"""
+    try:
+        with DatabaseConnection() as db:
+            insert_query = """
+            INSERT INTO eval_hyse_components (
+                query, schema_approach, table_name_comp, table_header_comp, example_2rows_comp, example_3rows_comp,
+                table_header_embed, table_header_name_embed, 
+                example_2rows_embed, example_2rows_table_name_embed,
+                example_3rows_embed, example_3rows_table_name_embed
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+            """
+            
+            # Convert embeddings to lists for database storage
+            embed_lists = {}
+            for key, embedding in embeddings.items():
+                embed_lists[key] = embedding.tolist() if isinstance(embedding, np.ndarray) else embedding
+            
+            db.cursor.execute(insert_query, (
+                query,
+                schema_approach,
+                components['table_name_comp'],
+                components['table_header_comp'], 
+                components['example_2rows_comp'],
+                components['example_3rows_comp'],
+                embed_lists['table_header_embed'],
+                embed_lists['table_header_name_embed'],
+                embed_lists['example_2rows_embed'], 
+                embed_lists['example_2rows_table_name_embed'],
+                embed_lists['example_3rows_embed'],
+                embed_lists['example_3rows_table_name_embed']
+            ))
+            db.conn.commit()
+    except Exception as e:
+        logging.exception(f"Error saving HySE components to DB: {e}")
+
+def retrieve_or_generate_hyse_components(query, num_embed, schema_approach="relational"):
+    """Retrieve cached HySE components or generate new ones if needed"""
+    logging.info(f"[HySE-Utils] Fetching {num_embed} components for query: '{query}' (schema: {schema_approach})")
+    
+    # Fetch cached components for the specific schema approach
+    cached_components = get_hyse_components_from_db(query, num_embed, schema_approach=schema_approach)
+    num_cached = len(cached_components)
+    
+    logging.info(f"[HySE-Utils] Found {num_cached} cached components, need {num_embed}")
+    
+    # If not enough cached, generate more
+    if num_cached < num_embed:
+        num_to_generate = num_embed - num_cached
+        logging.info(f"[HySE-Utils] Generating {num_to_generate} new components")
+        
+        for i in range(num_to_generate):
+            logging.info(f"[HySE-Utils] Generating component {i+1}/{num_to_generate}")
+            
+            # Generate new components
+            new_components = generate_hyse_components(query, schema_approach=schema_approach)
+            if new_components:
+                logging.info(f"[HySE-Utils] Generated components: table_name='{new_components['table_name_comp']}'")
+                logging.debug(f"[HySE-Utils] Table header: {new_components['table_header_comp']}")
+                
+                # Generate embeddings for new components
+                new_embeddings = generate_component_embeddings(new_components)
+                if new_embeddings:
+                    logging.info(f"[HySE-Utils] Generated {len(new_embeddings)} embeddings: {list(new_embeddings.keys())}")
+                    
+                    # Save to database with schema_approach
+                    save_hyse_components_to_db(query, new_components, new_embeddings, schema_approach=schema_approach)
+                    logging.info(f"[HySE-Utils] Saved component to database")
+                    
+                    # Add to cached list
+                    component_with_embeddings = new_components.copy()
+                    component_with_embeddings['embeddings'] = new_embeddings
+                    cached_components.append(component_with_embeddings)
+                else:
+                    logging.error(f"[HySE-Utils] Failed to generate embeddings for component {i+1}")
+            else:
+                logging.error(f"[HySE-Utils] Failed to generate component {i+1}")
+    else:
+        logging.info(f"[HySE-Utils] Using all cached components")
+    
+    logging.info(f"[HySE-Utils] Final result: {len(cached_components)} components ready")
+    return cached_components
+
+def clear_hyse_cache_for_testing(query=None, schema_approach=None):
+    """
+    Clear HySE component cache for testing new prompts - USE WITH CAUTION
+    """
+    try:
+        with DatabaseConnection() as db:
+            if query and schema_approach:
+                delete_query = "DELETE FROM eval_hyse_components WHERE query = %s AND schema_approach = %s;"
+                db.cursor.execute(delete_query, (query, schema_approach))
+                logging.info(f"[HySE-Cache] Cleared cache for query: '{query}' (schema: {schema_approach})")
+            elif query:
+                delete_query = "DELETE FROM eval_hyse_components WHERE query = %s;"
+                db.cursor.execute(delete_query, (query,))
+                logging.info(f"[HySE-Cache] Cleared all cache for query: '{query}'")
+            else:
+                delete_query = "DELETE FROM eval_hyse_components;"
+                db.cursor.execute(delete_query)
+                logging.warning(f"[HySE-Cache] Cleared ALL HySE component cache")
+            
+            db.conn.commit()
+            rows_deleted = db.cursor.rowcount
+            logging.info(f"[HySE-Cache] Deleted {rows_deleted} cached components")
+            
+    except Exception as e:
+        logging.exception(f"[HySE-Cache] Error clearing cache: {e}")

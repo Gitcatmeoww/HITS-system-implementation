@@ -119,6 +119,44 @@ class EvalData:
         else:
             return None
 
+    # def create_table_if_not_exists(self, db, table_name):
+    #     create_table_query = f'''
+    #     CREATE TABLE IF NOT EXISTS {table_name} (
+    #         table_name TEXT,
+    #         database_name TEXT,
+    #         table_header TEXT,
+    #         example_rows_md TEXT,
+    #         time_granu TEXT,
+    #         geo_granu TEXT,
+    #         db_description TEXT,
+    #         col_num INT,
+    #         row_num INT,
+    #         popularity INT,
+    #         usability_rating DECIMAL,
+    #         tags TEXT[],
+    #         file_size_in_byte INT,
+    #         keywords TEXT[],
+    #         task_queries TEXT[],
+    #         metadata_queries JSONB,
+    #         table_header_embed VECTOR(1536),
+    #         example_rows_embed VECTOR(1536)
+    #     );
+    #     '''
+    #     db.cursor.execute(create_table_query)
+
+    #     # Create index on the embedding columns for efficient similarity search
+    #     index_query_table_header_embed = f'''
+    #     CREATE INDEX IF NOT EXISTS {table_name}_table_header_embed_idx
+    #     ON {table_name} USING hnsw (table_header_embed vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+    #     '''
+    #     db.cursor.execute(index_query_table_header_embed)
+
+    #     index_query_example_rows_embed = f'''
+    #     CREATE INDEX IF NOT EXISTS {table_name}_example_rows_embed_idx
+    #     ON {table_name} USING hnsw (example_rows_embed vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+    #     '''
+    #     db.cursor.execute(index_query_example_rows_embed)
+
     def create_table_if_not_exists(self, db, table_name):
         create_table_query = f'''
         CREATE TABLE IF NOT EXISTS {table_name} (
@@ -126,6 +164,8 @@ class EvalData:
             database_name TEXT,
             table_header TEXT,
             example_rows_md TEXT,
+            example_2rows_md TEXT,
+            example_3rows_md TEXT,
             time_granu TEXT,
             geo_granu TEXT,
             db_description TEXT,
@@ -139,23 +179,33 @@ class EvalData:
             task_queries TEXT[],
             metadata_queries JSONB,
             table_header_embed VECTOR(1536),
-            example_rows_embed VECTOR(1536)
+            table_header_name_embed VECTOR(1536),
+            example_rows_embed VECTOR(1536),
+            example_2rows_embed VECTOR(1536),
+            example_3rows_embed VECTOR(1536),
+            example_2rows_table_name_embed VECTOR(1536),
+            example_3rows_table_name_embed VECTOR(1536)
         );
         '''
         db.cursor.execute(create_table_query)
 
-        # Create index on the embedding columns for efficient similarity search
-        index_query_table_header_embed = f'''
-        CREATE INDEX IF NOT EXISTS {table_name}_table_header_embed_idx
-        ON {table_name} USING hnsw (table_header_embed vector_cosine_ops) WITH (m = 16, ef_construction = 64);
-        '''
-        db.cursor.execute(index_query_table_header_embed)
-
-        index_query_example_rows_embed = f'''
-        CREATE INDEX IF NOT EXISTS {table_name}_example_rows_embed_idx
-        ON {table_name} USING hnsw (example_rows_embed vector_cosine_ops) WITH (m = 16, ef_construction = 64);
-        '''
-        db.cursor.execute(index_query_example_rows_embed)
+        # Create indexes for embedding columns
+        embedding_columns = [
+            'table_header_embed',
+            'table_header_name_embed',
+            'example_rows_embed', 
+            'example_2rows_embed',
+            'example_3rows_embed',
+            'example_2rows_table_name_embed',
+            'example_3rows_table_name_embed'
+        ]
+        
+        for col in embedding_columns:
+            index_query = f'''
+            CREATE INDEX IF NOT EXISTS {table_name}_{col}_idx
+            ON {table_name} USING hnsw ({col} vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+            '''
+            db.cursor.execute(index_query)
     
     def insert_eval_data(self):
         with DatabaseConnection() as db:
@@ -338,6 +388,104 @@ class EvalData:
 
         print("✅ Preprocessed evaluation data insertion completed.")
 
+    def insert_preprocessed_eval_data_with_hyse_components(self):
+        with DatabaseConnection() as db:
+            # Enable the pgvector extension
+            db.cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            db.conn.commit()
+            print("✅ pgvector extension enabled successfully.")
+
+            for csv_file, table_name in self.csv_table_mapping.items():
+                csv_file_path = os.path.join(self.csv_files_path, csv_file)
+                if not os.path.exists(csv_file_path):
+                    print(f"CSV file {csv_file_path} does not exist.")
+                    continue
+
+                print(f"⏳ Processing {csv_file_path} into table {table_name}.")
+
+                # Create the table if it does not exist
+                self.create_table_if_not_exists(db, table_name)
+
+                # Read the CSV file
+                df = pd.read_csv(csv_file_path)
+
+                # Prepare the insert query
+                insert_query = f'''
+                INSERT INTO {table_name} (
+                    table_name,
+                    database_name,
+                    table_header,
+                    example_rows_md,
+                    example_2rows_md,
+                    example_3rows_md,
+                    time_granu,
+                    geo_granu,
+                    db_description,
+                    col_num,
+                    row_num,
+                    popularity,
+                    usability_rating,
+                    tags,
+                    file_size_in_byte,
+                    keywords,
+                    task_queries,
+                    metadata_queries,
+                    table_header_embed,
+                    table_header_name_embed,
+                    example_rows_embed,
+                    example_2rows_embed,
+                    example_3rows_embed,
+                    example_2rows_table_name_embed,
+                    example_3rows_table_name_embed
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                '''
+
+                # Iterate over rows in the DataFrame
+                data_to_insert = []
+                for index, row in df.iterrows():
+                    try:
+                        data_to_insert.append((
+                            row['table_name'],
+                            row['database_name'],
+                            row['table_header'],
+                            row['example_rows_md'],
+                            row['example_2rows_md'],
+                            row['example_3rows_md'],
+                            row['time_granu'],
+                            row['geo_granu'],
+                            row['db_description'],
+                            int(row['col_num']) if row['col_num'] is not None else None,
+                            int(row['row_num']) if row['row_num'] is not None else None,
+                            int(row['popularity']) if row['popularity'] is not None else None,
+                            float(row['usability_rating']) if row['usability_rating'] is not None else None,
+                            parse_list_column(row['tags']),
+                            int(row['file_size_in_byte']) if row['file_size_in_byte'] is not None else None,
+                            parse_list_column(row['keywords']),
+                            parse_list_column(row['task_queries']),
+                            Json(parse_json_column(row['metadata_queries'])),
+                            parse_vector_column(row['table_header_embed']),
+                            parse_vector_column(row['table_header_name_embed']),
+                            parse_vector_column(row['example_rows_embed']),
+                            parse_vector_column(row['example_2rows_embed']),
+                            parse_vector_column(row['example_3rows_embed']),
+                            parse_vector_column(row['example_2rows_table_name_embed']),
+                            parse_vector_column(row['example_3rows_table_name_embed'])
+                        ))
+                    except Exception as e:
+                        print(f"Error processing row {index} in file {csv_file_path}: {e}")
+                        continue
+
+                # Batch insert the data
+                if data_to_insert:
+                    db.cursor.executemany(insert_query, data_to_insert)
+                    db.conn.commit()
+                    print(f"✅ Data from {csv_file_path} inserted into {table_name}.")
+                else:
+                    print(f"No valid rows found in {csv_file_path}.")
+
+        print("✅ Preprocessed evaluation data insertion completed.")
+
     def initialize_eval_hyse_schemas_table(self):
         create_table_query = """
         CREATE TABLE IF NOT EXISTS eval_hyse_schemas (
@@ -364,6 +512,54 @@ class EvalData:
             db.cursor.execute(index_query)
             db.conn.commit()
             print("✅ Index hypo_schema_embed_idx created successfully.")
+    
+    def initialize_eval_hyse_components_table(self):
+        """Create table for storing all HySE components with separate embeddings"""
+        create_table_query = """
+        CREATE TABLE IF NOT EXISTS eval_hyse_components (
+            query TEXT NOT NULL,
+            schema_approach TEXT NOT NULL,
+            hypo_schema_id SERIAL,
+            table_name_comp TEXT,
+            table_header_comp TEXT,
+            example_2rows_comp TEXT,
+            example_3rows_comp TEXT,
+            table_header_embed VECTOR(1536),
+            table_header_name_embed VECTOR(1536),
+            example_2rows_embed VECTOR(1536),
+            example_2rows_table_name_embed VECTOR(1536),
+            example_3rows_embed VECTOR(1536),
+            example_3rows_table_name_embed VECTOR(1536),
+            PRIMARY KEY (query, schema_approach, hypo_schema_id)
+        );
+        """
+        
+        with DatabaseConnection() as db:
+            # Enable the pgvector extension
+            db.cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            db.cursor.execute(create_table_query)
+            db.conn.commit()
+            print("✅ eval_hyse_components table created successfully.")
+
+            # Create indexes for all embedding columns
+            embedding_columns = [
+                'table_header_embed',
+                'table_header_name_embed', 
+                'example_2rows_embed',
+                'example_2rows_table_name_embed',
+                'example_3rows_embed',
+                'example_3rows_table_name_embed'
+            ]
+            
+            for col in embedding_columns:
+                index_query = f"""
+                CREATE INDEX IF NOT EXISTS eval_hyse_components_{col}_idx
+                ON eval_hyse_components USING hnsw ({col} vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+                """
+                db.cursor.execute(index_query)
+                print(f"✅ Index eval_hyse_components_{col}_idx created successfully.")
+            
+            db.conn.commit()
     
     def initialize_eval_hyse_schemas_non_relational_table(self):
         create_table_query = """
@@ -470,9 +666,11 @@ def main():
         # Insert evaluation data
         eval_data = EvalData(openai_client)
         # eval_data.insert_eval_data()
-        eval_data.insert_preprocessed_eval_data()
-        eval_data.initialize_eval_hyse_schemas_table()
-        eval_data.initialize_eval_hyse_schemas_non_relational_table()
+        # eval_data.insert_preprocessed_eval_data()
+        eval_data.insert_preprocessed_eval_data_with_hyse_components()
+        # eval_data.initialize_eval_hyse_schemas_table()
+        # eval_data.initialize_eval_hyse_schemas_non_relational_table()
+        eval_data.initialize_eval_hyse_components_table()
         eval_data.initialize_eval_query_embeds_table()
         eval_data.initialize_eval_keyword_embeds_table()
         eval_data.initialize_eval_metadata_sqlclauses_table()
