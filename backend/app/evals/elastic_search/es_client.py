@@ -46,12 +46,19 @@ class ElasticSearchClient(metaclass=SingletonMeta):
             raise e
 
     def get_index_mapping(self):
-        # Only index "table_name" & "example_rows_md" for evaluation purposes
+        # Index fields used for syntactic search: table_name, table_header, example_2rows_md, example_3rows_md
         return {
             "mappings": {
                 "properties": {
-                    "table_name": {"type": "text"},
-                    "example_rows_md": {"type": "text"}
+                    "table_name": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {"type": "keyword", "ignore_above": 256}
+                        }
+                    },
+                    "table_header": {"type": "text"},
+                    "example_2rows_md": {"type": "text"},
+                    "example_3rows_md": {"type": "text"}
                 }
             }
         }
@@ -68,11 +75,11 @@ class ElasticSearchClient(metaclass=SingletonMeta):
             raise e
 
     # Index a list of records into the specified Elasticsearch index using bulk indexing
-    def index_data(self, table_name, records):
+    def index_data(self, index_name, records):
         try:
             actions = [
                 {
-                    "_index": table_name,
+                    "_index": index_name,
                     "_source": record
                 }
                 for record in records
@@ -80,9 +87,9 @@ class ElasticSearchClient(metaclass=SingletonMeta):
             success, errors = helpers.bulk(self.client, actions, raise_on_error=False, refresh=True)
             if errors:
                 logging.error(f"Encountered errors during bulk indexing: {errors}")
-            logging.info(f"Indexed {success} records into '{table_name}' with {len(errors)} errors.")
+            logging.info(f"Indexed {success} records into '{index_name}' with {len(errors)} errors.")
         except Exception as e:
-            logging.error(f"Error indexing data into '{table_name}': {e}")
+            logging.error(f"Error indexing data into '{index_name}': {e}")
             raise e
 
 # Initialize the Singleton Elasticsearch client

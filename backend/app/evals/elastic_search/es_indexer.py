@@ -19,9 +19,8 @@ def index_data():
             # Ensure the Elasticsearch index exists
             es_client.create_index(table)
             
-            # Fetch only the necessary fields for partial indexing
-            # query = f"SELECT table_name, example_rows_md FROM {table};"
-            query = f"SELECT table_name, table_header FROM {table};"
+            # Fetch all fields needed for the new mapping
+            query = f"SELECT table_name, table_header, example_2rows_md, example_3rows_md FROM {table};"
             db.cursor.execute(query)
             records = db.cursor.fetchall()
             
